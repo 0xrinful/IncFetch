@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/0xrinful/Zenq/internal/service"
+	"github.com/0xrinful/InkFetch/internal/service"
 )
 
 type Auth struct {
@@ -17,6 +17,7 @@ type Auth struct {
 
 type authPageData struct {
 	Error string
+	Email string
 }
 
 func NewAuth(
@@ -43,7 +44,7 @@ func (a *Auth) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := r.FormValue("email")
+	email := strings.TrimSpace(r.FormValue("email"))
 	password := r.FormValue("password")
 
 	user, err := a.svc.SignIn(r.Context(), email, password)
@@ -52,9 +53,8 @@ func (a *Auth) LoginSubmit(w http.ResponseWriter, r *http.Request) {
 			w,
 			a.templates,
 			"login.html",
-			authPageData{Error: "Invalid email or password"},
+			authPageData{Error: "Invalid email or password.", Email: email},
 		)
-		w.Header().Set("Content-Type", "text/html")
 		return
 	}
 
@@ -72,17 +72,24 @@ func (a *Auth) SignupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := r.FormValue("email")
+	email := strings.TrimSpace(r.FormValue("email"))
 	password := r.FormValue("password")
+
+	if email == "" || len(password) < 4 {
+		renderTemplate(w, a.templates, "signup.html", authPageData{
+			Error: "Enter a valid email and a password of at least 4 characters.",
+			Email: email,
+		})
+		return
+	}
 
 	user, err := a.svc.SignUp(r.Context(), email, password)
 	if err != nil {
-		w.Header().Set("Content-Type", "text/html")
-		message := "Unable to create account"
+		message := "Unable to create account."
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
-			message = "Email already exists"
+			message = "An account with that email already exists."
 		}
-		renderTemplate(w, a.templates, "signup.html", authPageData{Error: message})
+		renderTemplate(w, a.templates, "signup.html", authPageData{Error: message, Email: email})
 		return
 	}
 

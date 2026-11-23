@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./web/templates/**/*.html", "./web/static/**/*.js"],
+  content: ["./ui/templates/**/*.html", "./ui/static/**/*.js"],
   safelist: [
     "animate-glow-pulse",
     "animate-pulse",
@@ -55,4 +55,4 @@ module.exports = {
       },
     },
   },
-}
+};

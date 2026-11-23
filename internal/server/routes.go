@@ -3,13 +3,13 @@ package server
 import (
 	"net/http"
 
-	"github.com/0xrinful/Zenq/internal/handlers"
+	"github.com/0xrinful/InkFetch/internal/handlers"
 )
 
 func routes(s *Server, secret string) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	fs := http.FileServer(http.Dir("web/static"))
+	fs := http.FileServer(http.Dir("ui/static"))
 	mux.Handle("/static/", http.StripPrefix("/static/", fs))
 
 	auth := handlers.NewAuth(
@@ -44,26 +44,34 @@ func routes(s *Server, secret string) *http.ServeMux {
 		return AdminRequired(secret, h)
 	}
 
+	// Library
 	mux.Handle("GET /{$}", requireAuth(library.Index))
+
+	// Manga detail & bulk/range actions
 	mux.Handle("GET /manga/{sourceID}/{slug}", requireAuth(manga.Detail))
 	mux.Handle("GET /manga/{sourceID}/{slug}/cover", requireAuth(manga.Cover))
 	mux.Handle("POST /manga/{sourceID}/{slug}/download", requireAuth(manga.Download))
 	mux.Handle("POST /manga/{sourceID}/{slug}/optimize", requireAuth(manga.Optimize))
 	mux.Handle("POST /manga/{sourceID}/{slug}/pack", requireAuth(manga.Pack))
 	mux.Handle("POST /manga/{sourceID}/{slug}/refresh", requireAuth(manga.Refresh))
+	mux.Handle("POST /manga/{sourceID}/{slug}/sync", requireAuth(manga.Refresh))
+	mux.Handle("POST /manga/{sourceID}/{slug}/chapters/bulk", requireAuth(manga.BulkAction))
 	mux.Handle("POST /manga/{sourceID}/{slug}/download/zip", requireAuth(manga.DownloadPacked))
 	mux.Handle("POST /manga/{sourceID}/{slug}/files", requireAuth(manga.DeleteFiles))
 	mux.Handle("DELETE /manga/{sourceID}/{slug}/unfavorite", requireAuth(manga.Unfavorite))
 
+	// Per-chapter actions
 	mux.Handle("POST /manga/{sourceID}/{slug}/ch/{num}/download", requireAuth(chapter.Download))
 	mux.Handle("POST /manga/{sourceID}/{slug}/ch/{num}/optimize", requireAuth(chapter.Optimize))
 	mux.Handle("POST /manga/{sourceID}/{slug}/ch/{num}/pack", requireAuth(chapter.Pack))
 	mux.Handle("POST /manga/{sourceID}/{slug}/ch/{num}/read", requireAuth(chapter.ToggleRead))
 
+	// Reader
 	mux.Handle("GET /manga/{sourceID}/{slug}/ch/{num}", requireAuth(viewer.Page))
 	mux.Handle("GET /manga/{sourceID}/{slug}/ch/{num}/pages", requireAuth(viewer.Pages))
 	mux.Handle("GET /manga/{sourceID}/{slug}/ch/{num}/img/{file}", requireAuth(viewer.Image))
 
+	// Discover / Sources
 	mux.Handle("GET /sources", requireAuth(sources.Index))
 	mux.Handle("GET /sources/{id}", requireAuth(sources.Browse))
 	mux.Handle("GET /sources/{id}/browse-results", requireAuth(sources.BrowseResults))
@@ -71,10 +79,25 @@ func routes(s *Server, secret string) *http.ServeMux {
 	mux.Handle("GET /sources/{id}/manga/{slug}", requireAuth(sources.MangaDetail))
 	mux.Handle("POST /sources/{id}/manga/{slug}/import", requireAuth(sources.Import))
 
-	mux.Handle("GET /dashboard", requireAuth(dashboard.Page))
+	// Downloads & Queue Management (keep /dashboard alias for compatibility)
+	mux.Handle("GET /downloads", requireAuth(dashboard.Page))
+	mux.Handle("GET /dashboard", requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/downloads", http.StatusFound)
+	}))
 	mux.Handle("GET /api/jobs", requireAuth(dashboard.Jobs))
 	mux.Handle("GET /api/jobs/{id}", requireAuth(dashboard.JobDetail))
+	mux.Handle("POST /api/jobs/{id}/cancel", requireAuth(dashboard.CancelJob))
+	mux.Handle("POST /api/jobs/{id}/retry", requireAuth(dashboard.RetryJob))
+	mux.Handle("POST /api/jobs/retry-failed", requireAuth(dashboard.RetryAllFailed))
+	mux.Handle("POST /api/jobs/clear", requireAuth(dashboard.ClearFinished))
+	mux.Handle("POST /api/jobs/pause", requireAuth(dashboard.PauseQueue))
+	mux.Handle("POST /api/jobs/resume", requireAuth(dashboard.ResumeQueue))
+	mux.Handle("GET /api/downloads/badge", requireAuth(dashboard.Badge))
 	mux.Handle("GET /api/storage", requireAuth(dashboard.Storage))
+
+	// Settings & FlareSolver controls
+	mux.Handle("GET /settings", requireAuth(dashboard.SettingsPage))
+	mux.Handle("POST /settings", requireAuth(dashboard.SaveSettings))
 	mux.Handle("POST /api/flaresolver/start", requireAdmin(dashboard.StartFlareSolver))
 	mux.Handle("POST /api/flaresolver/stop", requireAdmin(dashboard.StopFlareSolver))
 

@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/0xrinful/Zenq/internal/models"
-	"github.com/0xrinful/Zenq/internal/service"
+	"github.com/0xrinful/InkFetch/internal/models"
+	"github.com/0xrinful/InkFetch/internal/service"
 )
 
 type Viewer struct {
@@ -28,10 +28,12 @@ type viewerData struct {
 	MangaSlug     string
 	MangaTitle    string
 	ChapterNum    float64
+	ChapterTitle  string
 	PrevChapter   float64
 	NextChapter   float64
 	TotalChapters int
 	ChapterList   []models.ChapterRecord
+	IsDownloaded  bool
 }
 
 var errChapterNotFound = errors.New("chapter not found")
@@ -61,7 +63,8 @@ func (v *Viewer) Page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !chapterExists(result.Chapters, number) {
+	currentChapter := findChapter(result.Chapters, number)
+	if currentChapter == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -78,9 +81,12 @@ func (v *Viewer) Page(w http.ResponseWriter, r *http.Request) {
 		return chapterList[i].Number > chapterList[j].Number
 	})
 
-	if err := v.svc.MarkRead(r.Context(), userID, slug, sourceID, number); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	_, isDownloaded := chapterDir(currentChapter)
+	if isDownloaded {
+		if err := v.svc.MarkRead(r.Context(), userID, slug, sourceID, number); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	renderTemplate(w, v.templates, "viewer.html", viewerData{
@@ -88,10 +94,12 @@ func (v *Viewer) Page(w http.ResponseWriter, r *http.Request) {
 		MangaSlug:     slug,
 		MangaTitle:    result.Manga.Title,
 		ChapterNum:    number,
+		ChapterTitle:  currentChapter.Title,
 		PrevChapter:   prev,
 		NextChapter:   next,
 		TotalChapters: len(chapterList),
 		ChapterList:   chapterList,
+		IsDownloaded:  isDownloaded,
 	})
 }
 
@@ -185,6 +193,7 @@ func (v *Viewer) Image(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
@@ -251,13 +260,13 @@ func chapterDir(chapter *models.ChapterRecord) (string, bool) {
 	return "", false
 }
 
-func chapterExists(chapters []models.ChapterRecord, number float64) bool {
-	for _, ch := range chapters {
-		if ch.Number == number {
-			return true
+func findChapter(chapters []models.ChapterRecord, number float64) *models.ChapterRecord {
+	for i := range chapters {
+		if chapters[i].Number == number {
+			return &chapters[i]
 		}
 	}
-	return false
+	return nil
 }
 
 func findPrevNext(chapters []models.ChapterRecord, number float64) (float64, float64) {

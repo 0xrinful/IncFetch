@@ -1,0 +1,30 @@
+{{template "auth" .}}
+{{define "title"}}Sign In — InkFetch{{end}}
+{{define "auth-content"}}
+  <div class="auth-panel">
+    <div>
+      <h1 class="auth-heading">Sign in</h1>
+      <p class="auth-sub">Access your manga library and downloads.</p>
+    </div>
+
+    {{if .Error}}
+      <div class="alert-error" role="alert">{{.Error}}</div>
+    {{end}}
+
+    <form method="post" action="/login" style="display:flex;flex-direction:column;gap:12px;">
+      <div class="field">
+        <label class="field-label" for="email">Email</label>
+        <input id="email" class="input input-full" type="email" name="email" value="{{.Email}}" autocomplete="email" required />
+      </div>
+      <div class="field">
+        <label class="field-label" for="password">Password</label>
+        <input id="password" class="input input-full" type="password" name="password" autocomplete="current-password" required />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%;margin-top:4px;">Sign In</button>
+    </form>
+  </div>
+
+  <p class="auth-footer">
+    Need an account? <a href="/signup">Create one</a>
+  </p>
+{{end}}

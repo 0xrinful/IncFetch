@@ -2,14 +2,18 @@ package queue
 
 import (
 	"context"
-	"time"
+	"fmt"
+	"sync"
 
-	"github.com/0xrinful/Zenq/internal/optimizer"
-	"github.com/0xrinful/Zenq/internal/packer"
-	"github.com/0xrinful/Zenq/internal/registry"
-	"github.com/0xrinful/Zenq/internal/storage/db"
-	"github.com/0xrinful/Zenq/internal/storage/files"
+	"github.com/0xrinful/InkFetch/internal/models"
+	"github.com/0xrinful/InkFetch/internal/optimizer"
+	"github.com/0xrinful/InkFetch/internal/packer"
+	"github.com/0xrinful/InkFetch/internal/registry"
+	"github.com/0xrinful/InkFetch/internal/storage/db"
+	"github.com/0xrinful/InkFetch/internal/storage/files"
 )
+
+type SettingsProvider func() models.AppSettings
 
 type Config struct {
 	AutoOptimize bool
@@ -21,76 +25,185 @@ type Worker struct {
 	registry  *registry.Registry
 	optimizer *optimizer.Optimizer
 	packer    *packer.Packer
-	config    Config
+	settings  SettingsProvider
 	db        *db.DB
 	files     *files.Store
+	wg        sync.WaitGroup
 }
 
 func NewWorker(
 	q *Queue,
 	reg *registry.Registry,
 	cfg Config,
-	db *db.DB,
-	files *files.Store,
+	database *db.DB,
+	fileStore *files.Store,
 ) *Worker {
+	defaultProvider := func() models.AppSettings {
+		s := models.DefaultSettings()
+		s.AutoOptimize = cfg.AutoOptimize
+		s.AutoPack = cfg.AutoPack
+		return s
+	}
+	return NewWorkerWithSettings(q, reg, defaultProvider, database, fileStore)
+}
+
+func NewWorkerWithSettings(
+	q *Queue,
+	reg *registry.Registry,
+	provider SettingsProvider,
+	database *db.DB,
+	fileStore *files.Store,
+) *Worker {
+	if provider == nil {
+		provider = models.DefaultSettings
+	}
 	return &Worker{
-		queue:    q,
-		registry: reg,
-		config:   cfg,
-		db:       db,
-		files:    files,
+		queue:     q,
+		registry:  reg,
+		optimizer: optimizer.New(),
+		packer:    packer.New(),
+		settings:  provider,
+		db:        database,
+		files:     fileStore,
 	}
 }
 
 func (w *Worker) Start(ctx context.Context) {
-	go w.runPool(ctx, w.queue.downloads, 10)
-	go w.runPool(ctx, w.queue.optimizes, 2)
-	go w.runPool(ctx, w.queue.packs, 3)
+	w.wg.Add(3)
+	go func() {
+		defer w.wg.Done()
+		w.runPool(ctx, JobDownload, func() int {
+			return w.settings().Normalized().DownloadConcurrency
+		})
+	}()
+	go func() {
+		defer w.wg.Done()
+		w.runPool(ctx, JobOptimize, func() int { return 2 })
+	}()
+	go func() {
+		defer w.wg.Done()
+		w.runPool(ctx, JobPack, func() int { return 3 })
+	}()
 }
 
-func (w *Worker) runPool(ctx context.Context, ch chan *Job, concurrency int) {
-	sem := make(chan struct{}, concurrency)
+func (w *Worker) Wait() {
+	w.wg.Wait()
+}
+
+func (w *Worker) runPool(ctx context.Context, kind JobType, maxLimit func() int) {
+	var (
+		mu      sync.Mutex
+		cond    = sync.NewCond(&mu)
+		active  int
+		localWG sync.WaitGroup
+	)
+
+	go func() {
+		<-ctx.Done()
+		mu.Lock()
+		cond.Broadcast()
+		mu.Unlock()
+	}()
+
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case job := <-ch:
-			sem <- struct{}{}
-			go func(j *Job) {
-				defer func() { <-sem }()
-				w.process(ctx, j)
-			}(job)
+		mu.Lock()
+		for active >= maxLimit() && ctx.Err() == nil {
+			cond.Wait()
 		}
+		if ctx.Err() != nil {
+			mu.Unlock()
+			break
+		}
+		mu.Unlock()
+
+		job := w.queue.next(ctx, kind)
+		if job == nil {
+			break
+		}
+
+		mu.Lock()
+		active++
+		mu.Unlock()
+
+		localWG.Add(1)
+		go func(j *Job) {
+			defer func() {
+				mu.Lock()
+				active--
+				cond.Signal()
+				mu.Unlock()
+				localWG.Done()
+			}()
+			w.process(ctx, j)
+		}(job)
 	}
+
+	localWG.Wait()
 }
 
 func (w *Worker) process(ctx context.Context, job *Job) {
-	job.Status = JobRunning
-	job.StartedAt = time.Now().UTC()
+	jobCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	if !w.queue.markRunning(job, cancel) {
+		return
+	}
+
+	cfg := w.settings().Normalized()
 
 	var err error
 	switch job.Type {
 	case JobDownload:
-		src, _ := w.registry.Source(job.Chapter.SourceID)
+		src, ok := w.registry.Source(job.Chapter.SourceID)
+		if !ok {
+			err = fmt.Errorf("unknown source %q", job.Chapter.SourceID)
+			break
+		}
 
-		pages, e := src.Pages(ctx, job.Chapter.URL)
+		pages, e := src.Pages(jobCtx, job.Chapter.URL)
 		if e != nil {
 			err = e
 			break
 		}
-		job.Chapter.Pages = pages
+		if len(pages) == 0 {
+			err = fmt.Errorf("source returned 0 pages for chapter")
+			break
+		}
 
-		dl, _ := w.registry.Downloader(job.Chapter.SourceID)
-		err = dl.DownloadChapter(ctx, job.Chapter, job.DestDir)
+		chapter := job.Chapter
+		chapter.Pages = pages
+
+		dl, ok := w.registry.Downloader(job.Chapter.SourceID)
+		if !ok {
+			err = fmt.Errorf("no downloader for source %q", job.Chapter.SourceID)
+			break
+		}
+
+		err = dl.DownloadChapterWithProgress(
+			jobCtx,
+			chapter,
+			job.DestDir,
+			cfg.PageConcurrency,
+			func(completed, total int, bytesDelta int64) {
+				w.queue.updateProgress(job, completed, total, bytesDelta)
+			},
+		)
 		if err == nil {
 			err = w.db.MarkDownloaded(job.Chapter, job.DestDir)
 		}
-		if err == nil && w.config.AutoOptimize {
+		if err == nil && cfg.AutoOptimize {
 			w.queue.Enqueue(&Job{
 				Type:    JobOptimize,
 				Chapter: job.Chapter,
 				SrcDir:  job.DestDir,
 				DestDir: w.files.OptimizedDir(job.Chapter),
+			})
+		} else if err == nil && cfg.AutoPack {
+			w.queue.Enqueue(&Job{
+				Type:     JobPack,
+				Chapter:  job.Chapter,
+				SrcDir:   job.DestDir,
+				DestFile: w.files.CBZPath(job.Chapter),
 			})
 		}
 
@@ -100,11 +213,19 @@ func (w *Worker) process(ctx context.Context, job *Job) {
 			break
 		}
 
-		err = w.optimizer.OptimizeChapter(ctx, job.SrcDir, job.DestDir)
+		err = w.optimizer.OptimizeChapterWithOptions(
+			jobCtx,
+			job.SrcDir,
+			job.DestDir,
+			cfg.OptimizeQuality,
+			func(completed, total int) {
+				w.queue.updateProgress(job, completed, total, 0)
+			},
+		)
 		if err == nil {
 			err = w.db.MarkOptimized(job.Chapter, job.DestDir)
 		}
-		if err == nil && w.config.AutoPack {
+		if err == nil && cfg.AutoPack {
 			w.queue.Enqueue(&Job{
 				Type:     JobPack,
 				Chapter:  job.Chapter,
@@ -114,17 +235,11 @@ func (w *Worker) process(ctx context.Context, job *Job) {
 		}
 
 	case JobPack:
-		err = w.packer.Pack(ctx, job.Chapter, job.SrcDir, job.DestFile)
+		err = w.packer.Pack(jobCtx, job.Chapter, job.SrcDir, job.DestFile)
 		if err == nil {
 			err = w.db.MarkPacked(job.Chapter, job.DestFile)
 		}
 	}
 
-	if err != nil {
-		job.Status = JobFailed
-		job.Error = err.Error()
-	} else {
-		job.Status = JobDone
-	}
-	job.DoneAt = time.Now().UTC()
+	w.queue.markFinished(job, err)
 }

@@ -1,39 +1,44 @@
 package registry
 
 import (
-	"github.com/0xrinful/Zenq/internal/downloader"
-	"github.com/0xrinful/Zenq/internal/requester"
-	"github.com/0xrinful/Zenq/internal/requester/flare"
-	"github.com/0xrinful/Zenq/internal/sources"
-	"github.com/0xrinful/Zenq/internal/sources/azora"
-	"github.com/0xrinful/Zenq/internal/sources/mangalek"
-	"github.com/0xrinful/Zenq/internal/sources/teamx"
+	"sort"
+
+	"github.com/0xrinful/InkFetch/internal/downloader"
+	"github.com/0xrinful/InkFetch/internal/requester"
+	"github.com/0xrinful/InkFetch/internal/requester/flare"
+	"github.com/0xrinful/InkFetch/internal/sources"
+	"github.com/0xrinful/InkFetch/internal/sources/azora"
+	"github.com/0xrinful/InkFetch/internal/sources/mangalek"
+	"github.com/0xrinful/InkFetch/internal/sources/teamx"
 )
 
 type Registry struct {
-	sources     map[string]sources.Source
-	downloaders map[string]*downloader.Downloader
+	sources      map[string]sources.Source
+	downloaders  map[string]*downloader.Downloader
+	flareEnabled bool
 }
 
-func NewRegistry(solver *flare.Solver) *Registry {
+func NewRegistry(solver *flare.Solver, store requester.SessionStore) *Registry {
 	r := &Registry{
-		sources:     make(map[string]sources.Source),
-		downloaders: make(map[string]*downloader.Downloader),
+		sources:      make(map[string]sources.Source),
+		downloaders:  make(map[string]*downloader.Downloader),
+		flareEnabled: solver != nil,
 	}
 
-	r.register(solver, mangalek.Config(), mangalek.New)
-	r.register(solver, azora.Config(), azora.New)
-	r.register(solver, teamx.Config(), teamx.New)
+	r.register(solver, store, mangalek.Config(), mangalek.New)
+	r.register(solver, store, azora.Config(), azora.New)
+	r.register(solver, store, teamx.Config(), teamx.New)
 
 	return r
 }
 
 func (r *Registry) register(
 	solver *flare.Solver,
+	store requester.SessionStore,
 	cfg sources.Config,
 	newSource func(*requester.Requester) sources.Source,
 ) {
-	req := requester.New(solver, cfg)
+	req := requester.NewWithStore(solver, store, cfg)
 	source := newSource(req)
 	dl := downloader.New(req)
 
@@ -53,11 +58,14 @@ func (r *Registry) Downloader(id string) (*downloader.Downloader, bool) {
 }
 
 func (r *Registry) AllSources() []sources.Source {
-	sources := make([]sources.Source, 0, len(r.sources))
+	list := make([]sources.Source, 0, len(r.sources))
 	for _, s := range r.sources {
-		sources = append(sources, s)
+		list = append(list, s)
 	}
-	return sources
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Info().Name < list[j].Info().Name
+	})
+	return list
 }
 
 func (r *Registry) Sources() []sources.SourceInfo {
@@ -65,5 +73,12 @@ func (r *Registry) Sources() []sources.SourceInfo {
 	for _, s := range r.sources {
 		infos = append(infos, s.Info())
 	}
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].Name < infos[j].Name
+	})
 	return infos
+}
+
+func (r *Registry) FlareEnabled() bool {
+	return r.flareEnabled
 }

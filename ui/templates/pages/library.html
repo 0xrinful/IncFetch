@@ -1,0 +1,122 @@
+{{template "base" .}}
+{{define "title"}}Library — InkFetch{{end}}
+{{define "content"}}
+<div class="page-wrap">
+  <header class="page-header">
+    <div>
+      <h1 class="page-title">Library</h1>
+      <p class="page-subtitle">
+        <span class="mono">{{.TotalCount}}</span> series ·
+        <span class="mono">{{.DownloadedTotal}}</span> chapters stored locally
+      </p>
+    </div>
+    <a href="/sources" class="btn btn-primary">
+      <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+      Discover Series
+    </a>
+  </header>
+
+  {{if gt .TotalCount 0}}
+  <form
+    id="library-filters"
+    class="toolbar"
+    hx-get="/"
+    hx-target="#library-grid-wrap"
+    hx-trigger="input changed delay:250ms from:#lib-search, change from:select"
+    hx-push-url="true"
+    hx-indicator="#global-indicator"
+  >
+    <div class="toolbar-group" style="flex:1;min-width:220px;">
+      <div class="input-wrap" style="flex:1;max-width:320px;">
+        <svg class="icon-sm input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <circle cx="11" cy="11" r="7" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          id="lib-search"
+          class="input input-full"
+          type="search"
+          name="q"
+          value="{{.Query}}"
+          placeholder="Filter titles or genres..."
+          aria-label="Filter library"
+        />
+      </div>
+    </div>
+
+    <div class="toolbar-group">
+      <select class="select" name="source" aria-label="Filter by source">
+        <option value="all"{{if or (eq .SourceFilter "") (eq .SourceFilter "all")}} selected{{end}}>All sources</option>
+        {{range .Sources}}
+          <option value="{{.ID}}"{{if eq $.SourceFilter .ID}} selected{{end}}>{{.Name}}</option>
+        {{end}}
+      </select>
+
+      <select class="select" name="status" aria-label="Filter by status">
+        <option value="all"{{if or (eq .Status "") (eq .Status "all")}} selected{{end}}>All statuses</option>
+        <option value="ongoing"{{if eq .Status "ongoing"}} selected{{end}}>Ongoing</option>
+        <option value="completed"{{if eq .Status "completed"}} selected{{end}}>Completed</option>
+        <option value="hiatus"{{if eq .Status "hiatus"}} selected{{end}}>Hiatus</option>
+        <option value="cancelled"{{if eq .Status "cancelled"}} selected{{end}}>Cancelled</option>
+      </select>
+
+      <select class="select" name="filter" aria-label="Filter by download state">
+        <option value="all"{{if or (eq .DownloadFilter "") (eq .DownloadFilter "all")}} selected{{end}}>All items</option>
+        <option value="downloaded"{{if eq .DownloadFilter "downloaded"}} selected{{end}}>Has downloads</option>
+        <option value="incomplete"{{if eq .DownloadFilter "incomplete"}} selected{{end}}>Incomplete</option>
+        <option value="unread"{{if eq .DownloadFilter "unread"}} selected{{end}}>Has unread</option>
+      </select>
+
+      <select class="select" name="sort" aria-label="Sort library">
+        <option value="updated"{{if eq .Sort "updated"}} selected{{end}}>Recently synced</option>
+        <option value="title"{{if eq .Sort "title"}} selected{{end}}>Title (A–Z)</option>
+        <option value="added"{{if eq .Sort "added"}} selected{{end}}>Recently added</option>
+        <option value="chapters"{{if eq .Sort "chapters"}} selected{{end}}>Most chapters</option>
+        <option value="downloaded"{{if eq .Sort "downloaded"}} selected{{end}}>Most downloaded</option>
+        <option value="unread"{{if eq .Sort "unread"}} selected{{end}}>Most unread</option>
+      </select>
+    </div>
+  </form>
+  {{end}}
+
+  <div id="library-grid-wrap">
+    {{template "library-grid-partial" .}}
+  </div>
+</div>
+{{end}}
+
+{{define "library-grid-partial"}}
+  {{if .Mangas}}
+    <div class="manga-grid">
+      {{range .Mangas}}
+        {{template "manga-card" .}}
+      {{end}}
+    </div>
+  {{else if gt .TotalCount 0}}
+    <div class="empty-state">
+      <div class="empty-state-icon" aria-hidden="true">
+        <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <circle cx="11" cy="11" r="7" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+      </div>
+      <div class="empty-state-title">No matching titles</div>
+      <p class="empty-state-desc">No series in your library match the current search or filter settings.</p>
+      <a href="/" class="btn btn-secondary btn-sm">Reset Filters</a>
+    </div>
+  {{else}}
+    <div class="empty-state">
+      <div class="empty-state-icon" aria-hidden="true">
+        <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+        </svg>
+      </div>
+      <div class="empty-state-title">Your library is empty</div>
+      <p class="empty-state-desc">Browse a connected manga source, add series to your library, and download chapters for offline reading.</p>
+      <a href="/sources" class="btn btn-primary">Browse Sources</a>
+    </div>
+  {{end}}
+{{end}}

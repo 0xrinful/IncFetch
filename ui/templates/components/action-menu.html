@@ -1,0 +1,82 @@
+{{define "action-menu"}}
+<dialog id="tools-dialog" class="modal-dialog" aria-labelledby="tools-dialog-title">
+  <div class="modal-header">
+    <h2 id="tools-dialog-title" class="modal-title">Batch &amp; Storage Tools</h2>
+    <button type="button" class="btn btn-ghost btn-icon" onclick="closeDialog('tools-dialog')" aria-label="Close">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
+      </svg>
+    </button>
+  </div>
+
+  <div class="modal-body">
+    {{range (actionSections .SourceID .MangaSlug)}}
+      {{if .HasRange}}
+      <div class="tool-section">
+        <div class="tool-section-title">{{.Label}}</div>
+        {{if .IsDownload}}
+        <form method="POST" action="{{.Endpoint}}" style="display:flex;flex-direction:column;gap:8px;">
+        {{else}}
+        <form hx-post="{{.Endpoint}}" hx-indicator="#global-indicator" onsubmit="closeDialog('tools-dialog')" style="display:flex;flex-direction:column;gap:8px;">
+        {{end}}
+          <div class="form-grid-2">
+            <input class="input input-sm mono" type="number" step="any" name="from" placeholder="From ch." />
+            <input class="input input-sm mono" type="number" step="any" name="to" placeholder="To ch." />
+          </div>
+          <div class="toolbar-group">
+            <label class="check-row">
+              <input type="checkbox" name="all" />
+              <span>All chapters</span>
+            </label>
+            {{if not .IsDownload}}
+            <label class="check-row">
+              <input type="checkbox" name="force" />
+              <span>Force re-run</span>
+            </label>
+            {{end}}
+          </div>
+          <button type="submit" class="btn btn-secondary btn-sm">Run {{.Label}}</button>
+        </form>
+      </div>
+      {{end}}
+    {{end}}
+
+    {{range (actionSections .SourceID .MangaSlug)}}
+      {{if .IsDelete}}
+      <div class="tool-section">
+        <div class="tool-section-title">Delete Local Files</div>
+        <form hx-post="{{.Endpoint}}" hx-indicator="#global-indicator" onsubmit="closeDialog('tools-dialog')" style="display:flex;flex-direction:column;gap:8px;">
+          <label class="check-row">
+            <input type="checkbox" name="raw" />
+            <span>Raw downloaded images</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" name="optimized" />
+            <span>Optimized WebP images</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" name="packed" />
+            <span>Packed .cbz archives</span>
+          </label>
+          <button type="submit" class="btn btn-danger btn-sm">Delete Selected Tiers</button>
+        </form>
+      </div>
+      {{end}}
+    {{end}}
+
+    <div class="tool-section">
+      <div class="tool-section-title">Library Membership</div>
+      <button
+        type="button"
+        class="btn btn-danger btn-sm"
+        hx-delete="/manga/{{.SourceID}}/{{.MangaSlug}}/unfavorite"
+        hx-confirm="Remove {{.Manga.Title}} from your library?"
+        hx-indicator="#global-indicator"
+      >
+        Remove from Library
+      </button>
+    </div>
+  </div>
+</dialog>
+{{end}}

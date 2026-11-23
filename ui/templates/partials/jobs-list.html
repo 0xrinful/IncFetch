@@ -1,0 +1,197 @@
+{{define "jobs-bundle-partial"}}
+  {{template "jobs-items-partial" .}}
+
+  {{if .OOB}}
+    <div id="queue-stats" class="status-strip" hx-swap-oob="outerHTML">
+      {{template "queue-stats-inner" .Stats}}
+    </div>
+
+    <div id="queue-pause-slot" hx-swap-oob="innerHTML">
+      {{template "queue-pause-btn" .Stats}}
+    </div>
+
+    <div id="job-filters" class="tab-strip" hx-swap-oob="outerHTML">
+      {{template "job-filter-tabs" .}}
+    </div>
+  {{end}}
+{{end}}
+
+{{define "queue-stats-inner"}}
+  <div class="status-cell">
+    <span class="status-cell-label">Active</span>
+    <span class="status-cell-val{{if gt .Running 0}} tone-accent{{end}}">{{.Running}}</span>
+  </div>
+  <div class="status-cell">
+    <span class="status-cell-label">Queued</span>
+    <span class="status-cell-val{{if gt .Pending 0}} tone-warn{{end}}">{{.Pending}}</span>
+  </div>
+  <div class="status-cell">
+    <span class="status-cell-label">Completed</span>
+    <span class="status-cell-val{{if gt .Done 0}} tone-ok{{end}}">{{.Done}}</span>
+  </div>
+  <div class="status-cell">
+    <span class="status-cell-label">Failed</span>
+    <span class="status-cell-val{{if gt .Failed 0}} tone-danger{{end}}">{{.Failed}}</span>
+  </div>
+  <div class="status-cell">
+    <span class="status-cell-label">Speed</span>
+    <span class="status-cell-val">{{formatSpeed .TotalSpeed}}</span>
+  </div>
+{{end}}
+
+{{define "queue-pause-btn"}}
+  {{if .Paused}}
+    <button
+      type="button"
+      class="btn btn-primary btn-sm"
+      data-queue-action
+      hx-post="/api/jobs/resume"
+      hx-target="#job-list"
+      hx-swap="innerHTML"
+      hx-indicator="#global-indicator"
+    >
+      <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <polygon points="5 3 19 12 5 21 5 3" />
+      </svg>
+      Resume Queue
+    </button>
+  {{else}}
+    <button
+      type="button"
+      class="btn btn-secondary btn-sm"
+      data-queue-action
+      hx-post="/api/jobs/pause"
+      hx-target="#job-list"
+      hx-swap="innerHTML"
+      hx-indicator="#global-indicator"
+    >
+      <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <rect x="6" y="4" width="4" height="16" />
+        <rect x="14" y="4" width="4" height="16" />
+      </svg>
+      Pause Queue
+    </button>
+  {{end}}
+{{end}}
+
+{{define "job-filter-tabs"}}
+  <button type="button" class="tab-btn{{if eq .ActiveStatus "all"}} active{{end}}" data-status="all" onclick="filterJobs('all')">
+    All <span class="tab-count">{{.Stats.Total}}</span>
+  </button>
+  <button type="button" class="tab-btn{{if eq .ActiveStatus "running"}} active{{end}}" data-status="running" onclick="filterJobs('running')">
+    Active <span class="tab-count">{{.Stats.Running}}</span>
+  </button>
+  <button type="button" class="tab-btn{{if eq .ActiveStatus "pending"}} active{{end}}" data-status="pending" onclick="filterJobs('pending')">
+    Queued <span class="tab-count">{{.Stats.Pending}}</span>
+  </button>
+  <button type="button" class="tab-btn{{if eq .ActiveStatus "done"}} active{{end}}" data-status="done" onclick="filterJobs('done')">
+    Done <span class="tab-count">{{.Stats.Done}}</span>
+  </button>
+  <button type="button" class="tab-btn{{if eq .ActiveStatus "failed"}} active{{end}}" data-status="failed" onclick="filterJobs('failed')">
+    Failed <span class="tab-count">{{.Stats.Failed}}</span>
+  </button>
+{{end}}
+
+{{define "jobs-items-partial"}}
+  {{if not .Jobs}}
+    <div style="padding: 40px 20px; text-align: center; color: var(--text-muted); font-size: 13px;">
+      No tasks in this view. Queue chapters from any manga in your library.
+    </div>
+  {{else}}
+    {{range .Jobs}}
+    <div class="job-row">
+      <div class="job-row-main">
+        <span class="pill {{if eq (jobStatusSlug .Status) "running"}}pill-accent{{else if eq (jobStatusSlug .Status) "done"}}pill-success{{else if eq (jobStatusSlug .Status) "failed"}}pill-danger{{else if eq (jobStatusSlug .Status) "pending"}}pill-warn{{end}}">
+          {{jobTypeLabel .Type}} · {{jobStatusLabel .Status}}
+        </span>
+
+        <div class="job-info">
+          <div class="job-title-line">
+            <span class="job-id">#{{.ID}}</span>
+            <a href="/manga/{{.SourceID}}/{{.MangaSlug}}" class="job-title">{{.Title}}</a>
+          </div>
+
+          {{if or (gt .TotalItems 0) (eq (jobStatusSlug .Status) "running")}}
+            {{$pct := pctInt .CompletedItems .TotalItems}}
+            <div class="job-progress-row">
+              <div class="progress-track">
+                <div class="progress-fill {{jobStatusSlug .Status}}" style="width: {{$pct}}%"></div>
+              </div>
+              <span class="job-meta-text">
+                {{if gt .TotalItems 0}}{{.CompletedItems}}/{{.TotalItems}} ({{$pct}}%){{else}}Preparing...{{end}}
+                {{if gt .BytesDownloaded 0}} · {{formatBytes .BytesDownloaded}}{{end}}
+                {{if gt .SpeedBps 0.0}} · {{formatSpeed .SpeedBps}}{{end}}
+              </span>
+            </div>
+          {{end}}
+
+          {{if .Error}}
+            <div class="job-error-inline" title="{{.Error}}">{{.Error}}</div>
+          {{end}}
+        </div>
+
+        <div class="job-actions">
+          {{if .CanCancel}}
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              data-queue-action
+              hx-post="/api/jobs/{{.ID}}/cancel"
+              hx-target="#job-list"
+              hx-swap="innerHTML"
+              hx-indicator="#global-indicator"
+            >Cancel</button>
+          {{end}}
+          {{if .CanRetry}}
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              data-queue-action
+              hx-post="/api/jobs/{{.ID}}/retry"
+              hx-target="#job-list"
+              hx-swap="innerHTML"
+              hx-indicator="#global-indicator"
+            >Retry</button>
+          {{end}}
+          <button
+            type="button"
+            class="btn btn-ghost btn-icon"
+            onclick="toggleJobDetail({{.ID}})"
+            aria-label="Toggle details for job #{{.ID}}"
+            aria-expanded="{{if eq $.Expanded .ID}}true{{else}}false{{end}}"
+          >
+            <svg class="icon-sm" style="transition:transform 150ms ease;{{if eq $.Expanded .ID}}transform:rotate(180deg);{{end}}" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {{if eq $.Expanded .ID}}
+        <div class="job-detail-drawer">
+          {{template "job-detail-partial" .}}
+        </div>
+      {{end}}
+    </div>
+    {{end}}
+  {{end}}
+{{end}}
+
+{{define "job-detail-partial"}}
+  <div class="job-detail-key">Source</div>
+  <div class="job-detail-val">{{.SourceID}} / {{.MangaSlug}}</div>
+
+  <div class="job-detail-key">Created</div>
+  <div class="job-detail-val">{{.CreatedAt.Format "2006-01-02 15:04:05 UTC"}}</div>
+
+  <div class="job-detail-key">Started</div>
+  <div class="job-detail-val">{{if .StartedAt}}{{.StartedAt.Format "2006-01-02 15:04:05 UTC"}}{{else}}—{{end}}</div>
+
+  <div class="job-detail-key">Finished</div>
+  <div class="job-detail-val">{{if .DoneAt}}{{.DoneAt.Format "2006-01-02 15:04:05 UTC"}}{{else}}—{{end}}</div>
+
+  {{if .Error}}
+    <div class="job-detail-key" style="color: var(--danger);">Error</div>
+    <div class="job-detail-val" style="color: var(--danger);">{{.Error}}</div>
+  {{end}}
+{{end}}

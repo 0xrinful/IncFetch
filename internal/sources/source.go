@@ -3,10 +3,11 @@ package sources
 import (
 	"context"
 
-	"github.com/0xrinful/Zenq/internal/models"
+	"github.com/0xrinful/InkFetch/internal/models"
 )
 
 type Config struct {
+	SourceID          string
 	BaseURL           string
 	NeedsFlare        bool
 	CloudflareTestURL string

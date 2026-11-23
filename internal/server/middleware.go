@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/0xrinful/Zenq/internal/contextkeys"
+	"github.com/0xrinful/InkFetch/internal/contextkeys"
 )
 
 func AuthRequired(secret string, next http.Handler) http.Handler {

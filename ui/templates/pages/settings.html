@@ -1,0 +1,227 @@
+{{template "base" .}}
+{{define "title"}}Settings — InkFetch{{end}}
+{{define "content"}}
+<div class="page-wrap page-wrap-narrow">
+  <header class="page-header">
+    <div>
+      <h1 class="page-title">Settings</h1>
+      <p class="page-subtitle">Configure download concurrency, post-processing pipeline, appearance, and services.</p>
+    </div>
+  </header>
+
+  <div class="settings-stack">
+    <form class="settings-group" hx-post="/settings" hx-indicator="#global-indicator">
+      <div class="settings-group-header">
+        <h2 class="settings-group-title">Download &amp; Processing Pipeline</h2>
+        <p class="settings-group-desc">Changes are saved to the database and applied immediately to new jobs.</p>
+      </div>
+
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <label class="settings-row-label" for="download_concurrency">Concurrent chapter downloads</label>
+          <span class="settings-row-hint">How many chapters download simultaneously (1–10). Lower values reduce rate-limiting.</span>
+        </div>
+        <input
+          id="download_concurrency"
+          name="download_concurrency"
+          type="number"
+          min="1"
+          max="10"
+          value="{{.Settings.DownloadConcurrency}}"
+          class="input mono"
+          style="width:84px;text-align:center;"
+        />
+      </div>
+
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <label class="settings-row-label" for="page_concurrency">Parallel pages per chapter</label>
+          <span class="settings-row-hint">Simultaneous image requests per active chapter (1–16).</span>
+        </div>
+        <input
+          id="page_concurrency"
+          name="page_concurrency"
+          type="number"
+          min="1"
+          max="16"
+          value="{{.Settings.PageConcurrency}}"
+          class="input mono"
+          style="width:84px;text-align:center;"
+        />
+      </div>
+
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <label class="settings-row-label" for="auto_optimize">Auto-optimize to WebP</label>
+          <span class="settings-row-hint">Automatically convert downloaded pages to WebP using cwebp or ImageMagick.</span>
+        </div>
+        <label class="switch">
+          <input id="auto_optimize" name="auto_optimize" type="checkbox"{{if .Settings.AutoOptimize}} checked{{end}} />
+          <span class="switch-track"></span>
+        </label>
+      </div>
+
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <label class="settings-row-label" for="optimize_quality">WebP quality</label>
+          <span class="settings-row-hint">Compression target from 50 (smaller files) to 95 (near lossless).</span>
+        </div>
+        <input
+          id="optimize_quality"
+          name="optimize_quality"
+          type="number"
+          min="50"
+          max="95"
+          value="{{.Settings.OptimizeQuality}}"
+          class="input mono"
+          style="width:84px;text-align:center;"
+        />
+      </div>
+
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <label class="settings-row-label" for="auto_pack">Auto-pack into CBZ</label>
+          <span class="settings-row-hint">Automatically archive each finished chapter into a .cbz file with ComicInfo.xml.</span>
+        </div>
+        <label class="switch">
+          <input id="auto_pack" name="auto_pack" type="checkbox"{{if .Settings.AutoPack}} checked{{end}} />
+          <span class="switch-track"></span>
+        </label>
+      </div>
+
+      <div class="settings-footer">
+        <button type="submit" class="btn btn-primary">Save Pipeline Settings</button>
+      </div>
+    </form>
+
+    <section class="settings-group">
+      <div class="settings-group-header">
+        <h2 class="settings-group-title">Appearance &amp; Themes</h2>
+        <p class="settings-group-desc">Choose a color palette for InkFetch. Stored locally in this browser and synced across pages.</p>
+      </div>
+      <div class="theme-grid" role="group" aria-label="Color theme">
+        <button type="button" class="theme-card" data-theme-choice="dark" onclick="setTheme('dark')">
+          <div class="theme-preview" style="background:#111214;">
+            <div class="theme-preview-bars">
+              <span class="theme-preview-line" style="background:#eef0f4;"></span>
+              <span class="theme-preview-line theme-preview-line-sm" style="background:#8f96a6;"></span>
+            </div>
+            <span class="theme-preview-pill" style="background:#c84525;"></span>
+          </div>
+          <div class="theme-card-meta">
+            <span class="theme-card-name">Sumi Ink <span class="theme-card-dot"></span></span>
+            <span class="theme-card-desc">Charcoal · Vermilion</span>
+          </div>
+        </button>
+
+        <button type="button" class="theme-card" data-theme-choice="light" onclick="setTheme('light')">
+          <div class="theme-preview" style="background:#f5f3ee;border-color:rgba(20,22,26,0.14);">
+            <div class="theme-preview-bars">
+              <span class="theme-preview-line" style="background:#17181c;"></span>
+              <span class="theme-preview-line theme-preview-line-sm" style="background:#5f6573;"></span>
+            </div>
+            <span class="theme-preview-pill" style="background:#b93b1d;"></span>
+          </div>
+          <div class="theme-card-meta">
+            <span class="theme-card-name">Washi Paper <span class="theme-card-dot"></span></span>
+            <span class="theme-card-desc">Warm Light · Vermilion</span>
+          </div>
+        </button>
+
+        <button type="button" class="theme-card" data-theme-choice="violet" onclick="setTheme('violet')">
+          <div class="theme-preview" style="background:#0e0b16;border-color:rgba(186,152,255,0.22);">
+            <div class="theme-preview-bars">
+              <span class="theme-preview-line" style="background:#f2eeff;"></span>
+              <span class="theme-preview-line theme-preview-line-sm" style="background:#9b8ec4;"></span>
+            </div>
+            <span class="theme-preview-pill" style="background:#7c3aed;box-shadow:0 0 10px rgba(139,92,246,0.55);"></span>
+          </div>
+          <div class="theme-card-meta">
+            <span class="theme-card-name">Dark Violet <span class="theme-card-dot"></span></span>
+            <span class="theme-card-desc">Amethyst · Electric Violet</span>
+          </div>
+        </button>
+
+        <button type="button" class="theme-card" data-theme-choice="neon-blue" onclick="setTheme('neon-blue')">
+          <div class="theme-preview" style="background:#070c17;border-color:rgba(69,216,255,0.24);">
+            <div class="theme-preview-bars">
+              <span class="theme-preview-line" style="background:#ebf5ff;"></span>
+              <span class="theme-preview-line theme-preview-line-sm" style="background:#82a2cc;"></span>
+            </div>
+            <span class="theme-preview-pill" style="background:#00c2ff;box-shadow:0 0 10px rgba(0,194,255,0.6);"></span>
+          </div>
+          <div class="theme-card-meta">
+            <span class="theme-card-name">Dark Blue Neon <span class="theme-card-dot"></span></span>
+            <span class="theme-card-desc">Abyssal · Cyan Neon</span>
+          </div>
+        </button>
+
+        <button type="button" class="theme-card" data-theme-choice="crimson" onclick="setTheme('crimson')">
+          <div class="theme-preview" style="background:#130a10;border-color:rgba(255,130,174,0.22);">
+            <div class="theme-preview-bars">
+              <span class="theme-preview-line" style="background:#fdf0f5;"></span>
+              <span class="theme-preview-line theme-preview-line-sm" style="background:#b48ca1;"></span>
+            </div>
+            <span class="theme-preview-pill" style="background:#e11d64;box-shadow:0 0 10px rgba(244,63,125,0.55);"></span>
+          </div>
+          <div class="theme-card-meta">
+            <span class="theme-card-name">Sakura Noir <span class="theme-card-dot"></span></span>
+            <span class="theme-card-desc">Obsidian · Neon Crimson</span>
+          </div>
+        </button>
+
+        <button type="button" class="theme-card" data-theme-choice="emerald" onclick="setTheme('emerald')">
+          <div class="theme-preview" style="background:#081210;border-color:rgba(69,242,185,0.22);">
+            <div class="theme-preview-bars">
+              <span class="theme-preview-line" style="background:#ebfbf6;"></span>
+              <span class="theme-preview-line theme-preview-line-sm" style="background:#82aea1;"></span>
+            </div>
+            <span class="theme-preview-pill" style="background:#10d998;box-shadow:0 0 10px rgba(16,217,152,0.55);"></span>
+          </div>
+          <div class="theme-card-meta">
+            <span class="theme-card-name">Cyber Emerald <span class="theme-card-dot"></span></span>
+            <span class="theme-card-desc">Deep Pine · Mint Neon</span>
+          </div>
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <div class="settings-group-header">
+        <h2 class="settings-group-title">Storage &amp; Services</h2>
+        <p class="settings-group-desc">Local data directory usage and Cloudflare solver status.</p>
+      </div>
+
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <span class="settings-row-label">Data directory</span>
+          <span class="settings-row-hint mono">{{.FilesRoot}}</span>
+        </div>
+        <div style="min-width:220px;">
+          {{template "storage-partial" .Storage}}
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <div class="settings-row-info">
+          <span class="settings-row-label">FlareSolver</span>
+          {{if not .FlareEnabled}}
+            <span class="settings-row-hint">Disabled via <span class="mono">FLARESOLVER_ENABLED="false"</span> in <span class="mono">.env</span>.</span>
+          {{end}}
+        </div>
+        {{if .FlareEnabled}}
+          <div id="flare-box" style="display:flex;align-items:center;gap:12px;">
+            {{if .IsFlareRunning}}
+              {{template "flare-status-partial-running" .}}
+            {{else}}
+              {{template "flare-status-partial-stopped" .}}
+            {{end}}
+          </div>
+        {{else}}
+          <span class="pill">Disabled</span>
+        {{end}}
+      </div>
+    </section>
+  </div>
+</div>
+{{end}}

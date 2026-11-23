@@ -6,7 +6,7 @@ import (
 	"html/template"
 	"net/http"
 
-	"github.com/0xrinful/Zenq/internal/contextkeys"
+	"github.com/0xrinful/InkFetch/internal/contextkeys"
 )
 
 type toastMessage struct {

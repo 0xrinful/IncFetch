@@ -1,0 +1,187 @@
+{{define "base"}}
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{block "title" .}}InkFetch{{end}}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="manifest" href="/static/manifest.json" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("inkfetch-theme");
+          if (t === "dark" || t === "light" || t === "violet" || t === "neon-blue" || t === "crimson" || t === "emerald") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (_e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/inkfetch.css" />
+    <script src="/static/htmx.js"></script>
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <div id="global-indicator" class="htmx-indicator global-activity" aria-hidden="true"></div>
+
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <a href="/" class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M12 3 18 11.5 12 21 6 11.5 12 3Z" />
+              <path d="M12 3v9" />
+            </svg>
+          </span>
+          <span class="brand-name">InkFetch</span>
+        </a>
+
+        <nav class="nav-list">
+          {{template "nav-items" .}}
+        </nav>
+
+        <div class="sidebar-footer">
+          <div id="sidebar-theme-switcher" class="theme-switcher">
+            <div id="sidebar-theme-popover" class="theme-popover" role="menu" aria-label="Choose theme">
+              <button type="button" class="theme-popover-item" data-theme-choice="dark" onclick="setTheme('dark')">
+                <span class="theme-popover-swatch" style="background:linear-gradient(135deg,#111214 55%,#c84525 55%);"></span>
+                <span>Sumi Ink</span>
+                <span class="theme-popover-check"></span>
+              </button>
+              <button type="button" class="theme-popover-item" data-theme-choice="light" onclick="setTheme('light')">
+                <span class="theme-popover-swatch" style="background:linear-gradient(135deg,#f5f3ee 55%,#b93b1d 55%);border-color:rgba(0,0,0,0.2);"></span>
+                <span>Washi Paper</span>
+                <span class="theme-popover-check"></span>
+              </button>
+              <button type="button" class="theme-popover-item" data-theme-choice="violet" onclick="setTheme('violet')">
+                <span class="theme-popover-swatch" style="background:linear-gradient(135deg,#141021 55%,#7c3aed 55%);"></span>
+                <span>Dark Violet</span>
+                <span class="theme-popover-check"></span>
+              </button>
+              <button type="button" class="theme-popover-item" data-theme-choice="neon-blue" onclick="setTheme('neon-blue')">
+                <span class="theme-popover-swatch" style="background:linear-gradient(135deg,#0b1222 55%,#00c2ff 55%);"></span>
+                <span>Dark Blue Neon</span>
+                <span class="theme-popover-check"></span>
+              </button>
+              <button type="button" class="theme-popover-item" data-theme-choice="crimson" onclick="setTheme('crimson')">
+                <span class="theme-popover-swatch" style="background:linear-gradient(135deg,#1a0e16 55%,#e11d64 55%);"></span>
+                <span>Sakura Noir</span>
+                <span class="theme-popover-check"></span>
+              </button>
+              <button type="button" class="theme-popover-item" data-theme-choice="emerald" onclick="setTheme('emerald')">
+                <span class="theme-popover-swatch" style="background:linear-gradient(135deg,#0c1916 55%,#10d998 55%);"></span>
+                <span>Cyber Emerald</span>
+                <span class="theme-popover-check"></span>
+              </button>
+            </div>
+            <button
+              id="sidebar-theme-trigger"
+              type="button"
+              class="sidebar-util-btn"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              onclick="toggleThemeMenu(this)"
+            >
+              <span class="theme-dot" aria-hidden="true"></span>
+              <span data-theme-label>Sumi Ink</span>
+            </button>
+          </div>
+
+          <form method="post" action="/logout">
+            <button type="submit" class="sidebar-util-btn">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              <span>Sign out</span>
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      <div class="main-viewport">
+        <main>
+          {{block "content" .}}{{end}}
+        </main>
+      </div>
+    </div>
+
+    <nav class="mobile-nav" aria-label="Mobile navigation">
+      <div class="mobile-nav-grid">
+        {{template "nav-items-mobile" .}}
+      </div>
+    </nav>
+
+    <div id="toast-container" class="toast-stack" aria-live="polite"></div>
+  </body>
+</html>
+{{end}}
+
+{{define "nav-items"}}
+  {{$p := .CurrentPath}}
+  <a href="/" class="nav-item{{if eq $p "library"}} active{{end}}">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+    </svg>
+    <span class="nav-item-label">Library</span>
+  </a>
+
+  <a href="/sources" class="nav-item{{if eq $p "sources"}} active{{end}}">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="9" />
+      <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+    </svg>
+    <span class="nav-item-label">Discover</span>
+  </a>
+
+  <a href="/downloads" class="nav-item{{if eq $p "downloads"}} active{{end}}">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+    <span class="nav-item-label">Downloads</span>
+    <span hx-get="/api/downloads/badge" hx-trigger="load, every 4s" hx-swap="innerHTML"></span>
+  </a>
+
+  <a href="/settings" class="nav-item{{if eq $p "settings"}} active{{end}}">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+    </svg>
+    <span class="nav-item-label">Settings</span>
+  </a>
+{{end}}
+
+{{define "nav-items-mobile"}}
+  {{$p := .CurrentPath}}
+  <a href="/" class="mobile-nav-item{{if eq $p "library"}} active{{end}}">
+    <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+    </svg>
+    <span>Library</span>
+  </a>
+  <a href="/sources" class="mobile-nav-item{{if eq $p "sources"}} active{{end}}">
+    <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="9" />
+      <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+    </svg>
+    <span>Discover</span>
+  </a>
+  <a href="/downloads" class="mobile-nav-item{{if eq $p "downloads"}} active{{end}}">
+    <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+    <span>Downloads</span>
+  </a>
+  <a href="/settings" class="mobile-nav-item{{if eq $p "settings"}} active{{end}}">
+    <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+    </svg>
+    <span>Settings</span>
+  </a>
+{{end}}

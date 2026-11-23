@@ -1,0 +1,104 @@
+{{template "base" .}}
+{{define "title"}}{{.Manga.Title}} — InkFetch{{end}}
+{{define "content"}}
+<div class="page-wrap page-wrap-narrow">
+  <a href="/sources/{{.SourceID}}" class="breadcrumb">
+    <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+    Back to {{.SourceName}}
+  </a>
+
+  <section class="detail-header">
+    <img
+      class="detail-cover"
+      src="{{if .InLibrary}}/manga/{{.SourceID}}/{{.Manga.Slug}}/cover{{else if .Manga.CoverURL}}{{.Manga.CoverURL}}{{else}}/static/cover-placeholder.svg{{end}}"
+      alt="{{.Manga.Title}} cover"
+      referrerpolicy="no-referrer"
+      onerror="this.onerror=null;this.src='/static/cover-placeholder.svg'"
+    />
+
+    <div class="detail-body">
+      <h1 class="detail-title">{{.Manga.Title}}</h1>
+
+      <div class="detail-meta-row">
+        <span class="pill">{{.SourceName}}</span>
+        {{if .Manga.Status}}
+          <span class="pill pill-{{lower .Manga.Status}}">{{.Manga.Status}}</span>
+        {{end}}
+        <span class="pill mono">{{len .Manga.Chapters}} chapters</span>
+      </div>
+
+      {{if .Manga.Description}}
+      <div>
+        <p id="desc" class="detail-desc clamped">{{.Manga.Description}}</p>
+        <button id="desc-btn" type="button" class="link-btn" onclick="toggleDesc()">Show more</button>
+      </div>
+      {{end}}
+
+      {{if .Manga.Genres}}
+      <div class="genre-list">
+        {{range .Manga.Genres}}
+          <span class="genre-chip">{{.}}</span>
+        {{end}}
+      </div>
+      {{end}}
+
+      <div class="detail-actions" id="source-import-slot">
+        {{if .InLibrary}}
+          <span class="pill pill-success">In Library</span>
+          <a href="/manga/{{.SourceID}}/{{.Manga.Slug}}" class="btn btn-primary">Open in Library</a>
+        {{else}}
+          <button
+            type="button"
+            class="btn btn-primary"
+            hx-post="/sources/{{.SourceID}}/manga/{{.Manga.Slug}}/import"
+            hx-target="#source-import-slot"
+            hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            hx-indicator="#global-indicator"
+          >
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add to Library
+          </button>
+        {{end}}
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="chapter-toolbar">
+      <h2 style="font-size:15px;font-weight:600;">Available Chapters <span class="mono" style="font-size:12.5px;color:var(--text-muted);font-weight:400;">({{len .Manga.Chapters}})</span></h2>
+      {{if not .InLibrary}}
+        <span style="font-size:12.5px;color:var(--text-muted);">Add to library to select and download chapters.</span>
+      {{end}}
+    </div>
+
+    {{if .Manga.Chapters}}
+    <div class="chapter-table">
+      {{range .Manga.Chapters}}
+      <div class="preview-chapter-row">
+        <div class="chapter-heading-line">
+          <span class="chapter-link-num">Ch. {{formatChapterNum .Number}}</span>
+          {{if and .Title (ne .Title (formatChapterNum .Number))}}
+            <span class="chapter-link-title">{{.Title}}</span>
+          {{end}}
+        </div>
+        {{if not .ReleasedAt.IsZero}}
+          <span class="chapter-date">{{.ReleasedAt.Format "2006-01-02"}}</span>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="empty-state">
+      <div class="empty-state-title">No chapters listed</div>
+      <p class="empty-state-desc">This series currently has no accessible chapters on {{.SourceName}}.</p>
+    </div>
+    {{end}}
+  </section>
+</div>
+{{end}}

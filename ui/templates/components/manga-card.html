@@ -1,0 +1,37 @@
+{{define "manga-card"}}
+<a href="/manga/{{.SourceID}}/{{.Slug}}" class="manga-tile">
+  <div class="manga-cover-frame">
+    <img
+      src="/manga/{{.SourceID}}/{{.Slug}}/cover"
+      alt="{{.Title}}"
+      class="manga-cover-img"
+      loading="lazy"
+      onerror="this.onerror=null;this.src='/static/cover-placeholder.svg'"
+    />
+    {{if gt .TotalChapters 0}}
+      <span class="cover-badge-tl" title="{{.DownloadedChapters}} of {{.TotalChapters}} chapters downloaded">
+        {{.DownloadedChapters}}/{{.TotalChapters}}
+      </span>
+    {{end}}
+    {{if and (gt .TotalChapters 0) (gt .DownloadedChapters 0)}}
+      <div class="cover-progress-track">
+        <div class="cover-progress-fill" style="width: {{pctInt .DownloadedChapters .TotalChapters}}%"></div>
+      </div>
+    {{end}}
+  </div>
+  <div>
+    <div class="manga-tile-title" title="{{.Title}}">{{.Title}}</div>
+    <div class="manga-tile-meta">
+      <span>{{sourceLabel .SourceID}}</span>
+      {{if gt .TotalChapters 0}}
+        {{$unread := sub .TotalChapters .ReadChapters}}
+        {{if gt $unread 0}}
+          <span class="mono">{{$unread}} unread</span>
+        {{else}}
+          <span class="mono">Caught up</span>
+        {{end}}
+      {{end}}
+    </div>
+  </div>
+</a>
+{{end}}

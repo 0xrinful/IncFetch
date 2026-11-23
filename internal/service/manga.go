@@ -3,18 +3,23 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/0xrinful/Zenq/internal/models"
-	"github.com/0xrinful/Zenq/internal/queue"
-	"github.com/0xrinful/Zenq/internal/sources"
+	"github.com/0xrinful/InkFetch/internal/models"
+	"github.com/0xrinful/InkFetch/internal/queue"
+	"github.com/0xrinful/InkFetch/internal/sources"
 )
 
 func (s *Service) Library(ctx context.Context, userID int) ([]models.MangaRecord, error) {
 	return s.db.UserMangas(userID)
+}
+
+func (s *Service) LibrarySummaries(ctx context.Context, userID int) ([]models.MangaSummary, error) {
+	return s.db.UserMangaSummaries(userID)
 }
 
 type MangaPageResult struct {
@@ -90,8 +95,6 @@ func (s *Service) SourceSearch(
 	return src.Search(ctx, query, page, size)
 }
 
-// SourceManga scrapes a manga from a source and displays it
-// does not save to DB — just returns the scraped data for viewing
 func (s *Service) SourceManga(ctx context.Context, sourceID, slug string) (*models.Manga, error) {
 	src, ok := s.registry.Source(sourceID)
 	if !ok {
@@ -116,15 +119,16 @@ func extractExt(rawURL string) string {
 	if i := strings.IndexByte(rawURL, '?'); i != -1 {
 		rawURL = rawURL[:i]
 	}
-	ext := filepath.Ext(rawURL)
-	if ext == "" {
+	ext := strings.ToLower(filepath.Ext(rawURL))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
+		return ext
+	default:
 		return ".jpg"
 	}
-	return ext
 }
 
 func (s *Service) ImportManga(ctx context.Context, sourceID, slug string) error {
-	// scrape and save
 	src, ok := s.registry.Source(sourceID)
 	if !ok {
 		return ErrUnknownSource
@@ -135,30 +139,32 @@ func (s *Service) ImportManga(ctx context.Context, sourceID, slug string) error 
 		return fmt.Errorf("service: scrape manga: %w", err)
 	}
 
-	// download manga cover
 	dl, ok := s.registry.Downloader(manga.SourceID)
 	if !ok {
 		return ErrUnknownSource
 	}
 
-	coverPath := s.files.CoverPath(*manga, extractExt(manga.CoverURL))
-	if err := s.files.EnsureDir(filepath.Dir(coverPath)); err != nil {
-		return fmt.Errorf("service: ensure cover dir: %w", err)
+	coverPath := ""
+	if strings.TrimSpace(manga.CoverURL) != "" {
+		candidate := s.files.CoverPath(*manga, extractExt(manga.CoverURL))
+		if err := s.files.EnsureDir(filepath.Dir(candidate)); err != nil {
+			return fmt.Errorf("service: ensure cover dir: %w", err)
+		}
+		if err := dl.DownloadCover(ctx, manga.CoverURL, candidate); err != nil {
+			slog.Warn("cover download failed during import, continuing without local cover",
+				"source", sourceID, "slug", slug, "err", err)
+		} else {
+			coverPath = candidate
+		}
 	}
 
-	err = dl.DownloadCover(ctx, manga.CoverURL, coverPath)
-	if err != nil {
-		return fmt.Errorf("service: scrape cover: %w", err)
-	}
-
-	// save manga record
-	err = s.db.SaveManga(models.MangaRecord{
+	now := time.Now().UTC()
+	if err := s.db.SaveManga(models.MangaRecord{
 		Manga:     *manga,
-		AddedAt:   time.Now(),
-		UpdatedAt: time.Now(),
+		AddedAt:   now,
+		UpdatedAt: now,
 		CoverPath: coverPath,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("service: save manga: %w", err)
 	}
 
@@ -170,10 +176,8 @@ func (s *Service) ImportManga(ctx context.Context, sourceID, slug string) error 
 		manga.Chapters = chapters
 	}
 
-	// save all chapters
 	for _, ch := range manga.Chapters {
-		err = s.db.SaveChapter(models.ChapterRecord{Chapter: ch})
-		if err != nil {
+		if err := s.db.SaveChapter(models.ChapterRecord{Chapter: ch}); err != nil {
 			return fmt.Errorf("service: save chapter: %w", err)
 		}
 	}
@@ -181,8 +185,11 @@ func (s *Service) ImportManga(ctx context.Context, sourceID, slug string) error 
 	return nil
 }
 
-func (s *Service) RefreshManga(sourceID, slug string) error {
-	ctx := context.Background()
+func (s *Service) RefreshManga(ctx context.Context, sourceID, slug string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	manga, err := s.SourceManga(ctx, sourceID, slug)
 	if err != nil {
 		return fmt.Errorf("service: scrape manga: %w", err)
@@ -213,6 +220,17 @@ func (s *Service) RefreshManga(sourceID, slug string) error {
 	if existing != nil {
 		addedAt = existing.AddedAt
 		coverPath = existing.CoverPath
+	}
+
+	if coverPath == "" && strings.TrimSpace(manga.CoverURL) != "" {
+		if dl, ok := s.registry.Downloader(manga.SourceID); ok {
+			candidate := s.files.CoverPath(*manga, extractExt(manga.CoverURL))
+			if err := s.files.EnsureDir(filepath.Dir(candidate)); err == nil {
+				if err := dl.DownloadCover(ctx, manga.CoverURL, candidate); err == nil {
+					coverPath = candidate
+				}
+			}
+		}
 	}
 
 	if err := s.db.SaveManga(models.MangaRecord{
@@ -281,18 +299,14 @@ func (s *Service) DeleteMangaFiles(sourceID, slug string, req DeleteRequest) err
 	return nil
 }
 
-// Favorite adds a manga to the user's library
-// scrapes the full manga and saves it to DB if not already there
 func (s *Service) Favorite(ctx context.Context, userID int, sourceID, slug string) error {
-	// check if already in DB
 	existing, err := s.db.Manga(slug, sourceID)
 	if err != nil {
 		return err
 	}
 
 	if existing == nil {
-		err = s.ImportManga(ctx, sourceID, slug)
-		if err != nil {
+		if err := s.ImportManga(ctx, sourceID, slug); err != nil {
 			return err
 		}
 	}
@@ -309,18 +323,22 @@ func (s *Service) DownloadChapter(
 	sourceID string,
 	chapter models.Chapter,
 ) (int, error) {
+	id, _, err := s.downloadChapterUnique(chapter)
+	return id, err
+}
+
+func (s *Service) downloadChapterUnique(chapter models.Chapter) (int, bool, error) {
 	destDir := s.files.ChapterDir(chapter)
 	if err := s.files.EnsureDir(destDir); err != nil {
-		return 0, fmt.Errorf("service: ensure dir: %w", err)
+		return 0, false, fmt.Errorf("service: ensure dir: %w", err)
 	}
 
-	jobID := s.queue.Enqueue(&queue.Job{
+	jobID, created := s.queue.EnqueueUnique(&queue.Job{
 		Type:    queue.JobDownload,
 		Chapter: chapter,
 		DestDir: destDir,
 	})
-
-	return jobID, nil
+	return jobID, created, nil
 }
 
 func (s *Service) DownloadRange(
@@ -342,14 +360,47 @@ func (s *Service) DownloadRange(
 			continue
 		}
 
-		id, err := s.DownloadChapter(ctx, sourceID, ch.Chapter)
+		id, created, err := s.downloadChapterUnique(ch.Chapter)
 		if err != nil {
 			return nil, err
 		}
-		jobIDs = append(jobIDs, id)
+		if created {
+			jobIDs = append(jobIDs, id)
+		}
 	}
 
 	return jobIDs, nil
+}
+
+func (s *Service) DownloadChapters(
+	ctx context.Context,
+	sourceID, mangaSlug string,
+	numbers []float64,
+	force bool,
+) (int, error) {
+	selected := floatSet(numbers)
+	chapters, err := s.db.Chapters(mangaSlug, sourceID)
+	if err != nil {
+		return 0, err
+	}
+
+	queued := 0
+	for _, ch := range chapters {
+		if !selected[ch.Number] {
+			continue
+		}
+		if ch.Downloaded && !force {
+			continue
+		}
+		_, created, err := s.downloadChapterUnique(ch.Chapter)
+		if err != nil {
+			return queued, err
+		}
+		if created {
+			queued++
+		}
+	}
+	return queued, nil
 }
 
 func (s *Service) OptimizeChapter(ctx context.Context, chapter models.Chapter) (int, error) {
@@ -361,8 +412,11 @@ func (s *Service) OptimizeChapter(ctx context.Context, chapter models.Chapter) (
 		return 0, ErrNotDownloaded
 	}
 	destDir := s.files.OptimizedDir(chapter)
+	if err := s.files.EnsureDir(destDir); err != nil {
+		return 0, fmt.Errorf("service: ensure optimized dir: %w", err)
+	}
 
-	jobID := s.queue.Enqueue(&queue.Job{
+	jobID, _ := s.queue.EnqueueUnique(&queue.Job{
 		Type:    queue.JobOptimize,
 		Chapter: chapter,
 		SrcDir:  ch.RawPath,
@@ -393,16 +447,52 @@ func (s *Service) OptimizeRange(
 			return nil, err
 		}
 
-		id := s.queue.Enqueue(&queue.Job{
+		id, created := s.queue.EnqueueUnique(&queue.Job{
 			Type:    queue.JobOptimize,
 			Chapter: ch.Chapter,
 			SrcDir:  ch.RawPath,
 			DestDir: destDir,
 		})
-		jobIDs = append(jobIDs, id)
+		if created {
+			jobIDs = append(jobIDs, id)
+		}
 	}
 
 	return jobIDs, nil
+}
+
+func (s *Service) OptimizeChapters(
+	ctx context.Context,
+	sourceID, mangaSlug string,
+	numbers []float64,
+	force bool,
+) (int, error) {
+	selected := floatSet(numbers)
+	chapters, err := s.db.Chapters(mangaSlug, sourceID)
+	if err != nil {
+		return 0, err
+	}
+
+	queued := 0
+	for _, ch := range chapters {
+		if !selected[ch.Number] || !ch.Downloaded || (ch.Optimized && !force) {
+			continue
+		}
+		destDir := s.files.OptimizedDir(ch.Chapter)
+		if err := s.files.EnsureDir(destDir); err != nil {
+			return queued, err
+		}
+		_, created := s.queue.EnqueueUnique(&queue.Job{
+			Type:    queue.JobOptimize,
+			Chapter: ch.Chapter,
+			SrcDir:  ch.RawPath,
+			DestDir: destDir,
+		})
+		if created {
+			queued++
+		}
+	}
+	return queued, nil
 }
 
 func (s *Service) PackChapter(ctx context.Context, chapter models.Chapter) (int, error) {
@@ -414,13 +504,12 @@ func (s *Service) PackChapter(ctx context.Context, chapter models.Chapter) (int,
 		return 0, ErrNotDownloaded
 	}
 
-	// prefer optimized if available
 	srcDir := ch.RawPath
 	if ch.Optimized && ch.OptimizedPath != "" {
 		srcDir = ch.OptimizedPath
 	}
 
-	jobID := s.queue.Enqueue(&queue.Job{
+	jobID, _ := s.queue.EnqueueUnique(&queue.Job{
 		Type:     queue.JobPack,
 		Chapter:  chapter,
 		SrcDir:   srcDir,
@@ -445,11 +534,9 @@ func (s *Service) PackRange(
 		if !r.Contains(ch.Number) {
 			continue
 		}
-
 		if ch.Packed && !r.Force {
 			continue
 		}
-
 		if !ch.Downloaded {
 			continue
 		}
@@ -459,16 +546,52 @@ func (s *Service) PackRange(
 			srcDir = ch.OptimizedPath
 		}
 
-		id := s.queue.Enqueue(&queue.Job{
+		id, created := s.queue.EnqueueUnique(&queue.Job{
 			Type:     queue.JobPack,
 			Chapter:  ch.Chapter,
 			SrcDir:   srcDir,
 			DestFile: s.files.CBZPath(ch.Chapter),
 		})
-		jobIDs = append(jobIDs, id)
+		if created {
+			jobIDs = append(jobIDs, id)
+		}
 	}
 
 	return jobIDs, nil
+}
+
+func (s *Service) PackChapters(
+	ctx context.Context,
+	sourceID, mangaSlug string,
+	numbers []float64,
+	force bool,
+) (int, error) {
+	selected := floatSet(numbers)
+	chapters, err := s.db.Chapters(mangaSlug, sourceID)
+	if err != nil {
+		return 0, err
+	}
+
+	queued := 0
+	for _, ch := range chapters {
+		if !selected[ch.Number] || !ch.Downloaded || (ch.Packed && !force) {
+			continue
+		}
+		srcDir := ch.RawPath
+		if ch.Optimized && ch.OptimizedPath != "" {
+			srcDir = ch.OptimizedPath
+		}
+		_, created := s.queue.EnqueueUnique(&queue.Job{
+			Type:     queue.JobPack,
+			Chapter:  ch.Chapter,
+			SrcDir:   srcDir,
+			DestFile: s.files.CBZPath(ch.Chapter),
+		})
+		if created {
+			queued++
+		}
+	}
+	return queued, nil
 }
 
 func (s *Service) PackManga(
@@ -480,21 +603,27 @@ func (s *Service) PackManga(
 	if err != nil {
 		return "", fmt.Errorf("service: fetch manga record: %w", err)
 	}
+	if manga == nil {
+		return "", ErrNotFound
+	}
 
 	cbzPaths, err := s.files.CBZRange(manga.Manga, r)
 	if err != nil {
 		return "", fmt.Errorf("service: fetch cbz paths: %w", err)
 	}
+	if len(cbzPaths) == 0 {
+		return "", fmt.Errorf("no packed chapters in selected range — pack chapters first")
+	}
 
-	tmpFile, err := os.CreateTemp("", "manga-pack-*.zip")
+	tmpFile, err := os.CreateTemp("", "inkfetch-pack-*.zip")
 	if err != nil {
 		return "", fmt.Errorf("service: create temp file: %w", err)
 	}
 	destZip := tmpFile.Name()
 	tmpFile.Close()
 
-	err = s.packer.PackManga(ctx, manga.Manga, cbzPaths, manga.CoverPath, destZip)
-	if err != nil {
+	if err := s.packer.PackManga(ctx, manga.Manga, cbzPaths, manga.CoverPath, destZip); err != nil {
+		os.Remove(destZip)
 		return "", fmt.Errorf("service: failed compiling manga pack: %w", err)
 	}
 
@@ -525,4 +654,40 @@ func (s *Service) MarkUnread(
 	number float64,
 ) error {
 	return s.db.MarkUnread(userID, mangaSlug, sourceID, number)
+}
+
+func (s *Service) MarkChaptersRead(
+	ctx context.Context,
+	userID int,
+	sourceID, mangaSlug string,
+	numbers []float64,
+) error {
+	for _, n := range numbers {
+		if err := s.db.MarkRead(userID, mangaSlug, sourceID, n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) MarkChaptersUnread(
+	ctx context.Context,
+	userID int,
+	sourceID, mangaSlug string,
+	numbers []float64,
+) error {
+	for _, n := range numbers {
+		if err := s.db.MarkUnread(userID, mangaSlug, sourceID, n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func floatSet(nums []float64) map[float64]bool {
+	set := make(map[float64]bool, len(nums))
+	for _, n := range nums {
+		set[n] = true
+	}
+	return set
 }

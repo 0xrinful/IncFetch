@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.MangaTitle}} · Ch. {{formatChapterNum .ChapterNum}} — InkFetch</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("inkfetch-theme");
+          if (t === "dark" || t === "light" || t === "violet" || t === "neon-blue" || t === "crimson" || t === "emerald") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (_e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/static/inkfetch.css" />
+    <script src="/static/htmx.js"></script>
+    <script defer src="/static/app.js"></script>
+    <style>
+      :root { --viewer-bar-h: 48px; }
+      body.reader-body { background: var(--bg-canvas); color: var(--text-primary); overflow-x: hidden; }
+
+      .reader-bar {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        height: var(--viewer-bar-h);
+        z-index: 50;
+        background: var(--bg-rail);
+        border-bottom: 1px solid var(--border-subtle);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 14px;
+        gap: 10px;
+        transition: transform 180ms var(--ease), opacity 180ms var(--ease);
+      }
+      .reader-bar.hidden {
+        transform: translateY(-100%);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .reader-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        flex: 1;
+      }
+      .reader-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .reader-center {
+        position: relative;
+        flex-shrink: 0;
+      }
+      .reader-ch-pill {
+        display: inline-flex;
+        align-items: center;
+        height: 30px;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-sm);
+        background: var(--bg-surface);
+        overflow: hidden;
+      }
+      .reader-ch-step {
+        width: 30px;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        color: var(--text-secondary);
+        transition: background 120ms ease, color 120ms ease;
+      }
+      .reader-ch-step:hover { background: var(--bg-hover); color: var(--text-primary); }
+      .reader-ch-step.disabled { opacity: 0.35; pointer-events: none; }
+      .reader-ch-trigger {
+        height: 100%;
+        padding: 0 10px;
+        border-left: 1px solid var(--border-subtle);
+        border-right: 1px solid var(--border-subtle);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-primary);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .reader-ch-trigger:hover { background: var(--bg-hover); }
+
+      .reader-dropdown {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        width: 210px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-lg);
+        display: none;
+        overflow: hidden;
+        z-index: 60;
+      }
+      .reader-dropdown.open { display: block; }
+      .reader-dropdown-head {
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--border-subtle);
+      }
+      .reader-dropdown-list { max-height: 280px; overflow-y: auto; }
+      .reader-ch-opt {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px 12px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .reader-ch-opt:hover { background: var(--bg-hover); color: var(--text-primary); }
+      .reader-ch-opt.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+
+      .reader-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .reader-counter {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--text-secondary);
+        min-width: 56px;
+        text-align: right;
+      }
+      .reader-progress {
+        position: fixed;
+        top: var(--viewer-bar-h);
+        left: 0;
+        height: 2px;
+        width: 0%;
+        background: var(--accent);
+        z-index: 49;
+        transition: top 180ms var(--ease), width 80ms linear;
+      }
+      .reader-progress.flush { top: 0; }
+
+      .reader-stage {
+        padding-top: var(--viewer-bar-h);
+        padding-bottom: 72px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .reader-pages {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+      .reader-pages img {
+        display: block;
+        width: 100%;
+        max-width: 840px;
+        height: auto;
+        cursor: pointer;
+        user-select: none;
+      }
+      .reader-pages.fit-wide img { max-width: 1120px; }
+      .reader-pages.fit-original img { width: auto; max-width: 100%; }
+      .reader-pages img:not(.loaded) {
+        min-height: 420px;
+        background: linear-gradient(90deg, var(--bg-surface) 25%, var(--bg-elevated) 50%, var(--bg-surface) 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.4s infinite;
+      }
+
+      .reader-end {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        margin-top: 36px;
+        padding: 28px 24px;
+        width: min(400px, calc(100% - 32px));
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-md);
+        text-align: center;
+      }
+      .reader-end.visible { display: flex; }
+
+      @media (max-width: 600px) {
+        .reader-title, .fit-toggle-btn { display: none; }
+      }
+    </style>
+  </head>
+  <body class="reader-body">
+    <header id="reader-bar" class="reader-bar">
+      <div class="reader-left">
+        <a href="/manga/{{.SourceID}}/{{.MangaSlug}}" class="btn btn-ghost btn-sm">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back
+        </a>
+        <span class="reader-title" title="{{.MangaTitle}}">{{.MangaTitle}}</span>
+      </div>
+
+      <div class="reader-center">
+        <div class="reader-ch-pill" role="navigation" aria-label="Chapter navigation">
+          {{if gt .PrevChapter 0.0}}
+            <a id="prev-ch-link" class="reader-ch-step" href="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .PrevChapter}}" title="Previous chapter ([)">
+              <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="15 18 9 12 15 6" /></svg>
+            </a>
+          {{else}}
+            <span class="reader-ch-step disabled" aria-disabled="true">
+              <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="15 18 9 12 15 6" /></svg>
+            </span>
+          {{end}}
+
+          <button id="ch-trigger" type="button" class="reader-ch-trigger" aria-haspopup="listbox" aria-expanded="false">
+            Ch. {{formatChapterNum .ChapterNum}}
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9" /></svg>
+          </button>
+
+          {{if gt .NextChapter 0.0}}
+            <a id="next-ch-link" class="reader-ch-step" href="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .NextChapter}}" title="Next chapter (])">
+              <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="9 18 15 12 9 6" /></svg>
+            </a>
+          {{else}}
+            <span class="reader-ch-step disabled" aria-disabled="true">
+              <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="9 18 15 12 9 6" /></svg>
+            </span>
+          {{end}}
+        </div>
+
+        <div id="ch-dropdown" class="reader-dropdown" role="listbox" aria-label="Chapters">
+          <div class="reader-dropdown-head">{{.TotalChapters}} chapters</div>
+          <div id="ch-list" class="reader-dropdown-list">
+            {{range .ChapterList}}
+              <a
+                class="reader-ch-opt{{if eq .Number $.ChapterNum}} active{{end}}"
+                href="/manga/{{$.SourceID}}/{{$.MangaSlug}}/ch/{{formatChapterNum .Number}}"
+                role="option"
+              >
+                <span>Ch. {{formatChapterNum .Number}}</span>
+                {{if .Downloaded}}<span style="color:var(--ok);font-size:11.5px;">Local</span>{{end}}
+              </a>
+            {{end}}
+          </div>
+        </div>
+      </div>
+
+      <div class="reader-right">
+        <button id="fit-toggle" type="button" class="btn btn-ghost btn-sm fit-toggle-btn" title="Cycle page width">Standard</button>
+        <div id="page-counter" class="reader-counter">—</div>
+      </div>
+    </header>
+
+    <div id="reading-progress" class="reader-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+
+    <main class="reader-stage">
+      {{if not .IsDownloaded}}
+        <div class="empty-state" style="margin-top:48px;width:min(440px,calc(100% - 32px));">
+          <div class="empty-state-icon" aria-hidden="true">
+            <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </div>
+          <div class="empty-state-title">Chapter {{formatChapterNum .ChapterNum}} is not downloaded yet</div>
+          <p class="empty-state-desc">InkFetch serves the reader from local storage for fast, offline reading. Queue this chapter now to read it here.</p>
+          <div class="btn-group">
+            <button
+              type="button"
+              class="btn btn-primary"
+              hx-post="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .ChapterNum}}/download"
+              hx-disabled-elt="this"
+            >Download Chapter</button>
+            <a href="/downloads" class="btn btn-secondary">Open Downloads</a>
+          </div>
+        </div>
+      {{else}}
+        <div id="viewer-pages" class="reader-pages"></div>
+        <div id="end-card" class="reader-end">
+          <div style="font-size:12px;color:var(--text-muted);">Finished chapter</div>
+          <div style="font-size:15px;font-weight:600;">{{.MangaTitle}} · Ch. {{formatChapterNum .ChapterNum}}</div>
+          <div class="btn-group">
+            {{if gt .NextChapter 0.0}}
+              <a class="btn btn-primary" href="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .NextChapter}}">Next Chapter</a>
+            {{end}}
+            <a class="btn btn-secondary" href="/manga/{{.SourceID}}/{{.MangaSlug}}">All Chapters</a>
+          </div>
+        </div>
+      {{end}}
+    </main>
+
+    <div id="toast-container" class="toast-stack" aria-live="polite"></div>
+
+    <script>
+      (function () {
+        const bar = document.getElementById("reader-bar");
+        const progress = document.getElementById("reading-progress");
+        const container = document.getElementById("viewer-pages");
+        const endCard = document.getElementById("end-card");
+        const counter = document.getElementById("page-counter");
+        const chTrigger = document.getElementById("ch-trigger");
+        const chDropdown = document.getElementById("ch-dropdown");
+        const chList = document.getElementById("ch-list");
+        const fitBtn = document.getElementById("fit-toggle");
+
+        // Width modes
+        const fitModes = [
+          { cls: "", label: "Standard" },
+          { cls: "fit-wide", label: "Wide" },
+          { cls: "fit-original", label: "Original" },
+        ];
+        let fitIdx = 0;
+        if (fitBtn && container) {
+          fitBtn.addEventListener("click", () => {
+            fitIdx = (fitIdx + 1) % fitModes.length;
+            container.className = "reader-pages " + fitModes[fitIdx].cls;
+            fitBtn.textContent = fitModes[fitIdx].label;
+          });
+        }
+
+        // Auto-hide bar on scroll
+        let lastY = 0;
+        let barHidden = false;
+        function hideBar() {
+          if (barHidden) return;
+          barHidden = true;
+          bar.classList.add("hidden");
+          progress.classList.add("flush");
+        }
+        function showBar() {
+          if (!barHidden) return;
+          barHidden = false;
+          bar.classList.remove("hidden");
+          progress.classList.remove("flush");
+        }
+
+        let images = [];
+        function updateScroll() {
+          const y = window.scrollY;
+          if (y < 60) showBar();
+          else if (y - lastY > 6) hideBar();
+          else if (lastY - y > 6) showBar();
+          lastY = y;
+
+          const doc = document.documentElement;
+          const total = doc.scrollHeight - doc.clientHeight;
+          const pct = total > 0 ? Math.min(100, (y / total) * 100) : 0;
+          progress.style.width = pct + "%";
+          progress.setAttribute("aria-valuenow", String(Math.round(pct)));
+
+          if (images.length) {
+            const mid = y + window.innerHeight * 0.45;
+            let cur = 1;
+            for (let i = 0; i < images.length; i++) {
+              if (images[i].offsetTop <= mid) cur = i + 1;
+            }
+            counter.textContent = cur + " / " + images.length;
+          }
+        }
+        window.addEventListener("scroll", () => requestAnimationFrame(updateScroll), { passive: true });
+
+        // Chapter picker dropdown
+        let dropOpen = false;
+        function toggleDrop(open) {
+          dropOpen = open;
+          chDropdown.classList.toggle("open", open);
+          chTrigger.setAttribute("aria-expanded", String(open));
+          if (open) {
+            const active = chList.querySelector(".active");
+            if (active) active.scrollIntoView({ block: "nearest" });
+          }
+        }
+        chTrigger.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleDrop(!dropOpen);
+        });
+        document.addEventListener("click", (e) => {
+          if (dropOpen && !chDropdown.contains(e.target) && e.target !== chTrigger) toggleDrop(false);
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && dropOpen) toggleDrop(false);
+          if (e.key === "h" || e.key === "H") barHidden ? showBar() : hideBar();
+          if (e.key === "[") {
+            const prev = document.getElementById("prev-ch-link");
+            if (prev) window.location.href = prev.href;
+          }
+          if (e.key === "]") {
+            const next = document.getElementById("next-ch-link");
+            if (next) window.location.href = next.href;
+          }
+        });
+
+        if (!container) return;
+
+        fetch("/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .ChapterNum}}/pages")
+          .then((res) => {
+            if (!res.ok) throw new Error("Pages unavailable");
+            return res.json();
+          })
+          .then((data) => {
+            const urls = data.urls || [];
+            if (!urls.length) {
+              container.innerHTML = '<div class="empty-state" style="margin-top:40px;"><div class="empty-state-title">No image files found</div><p class="empty-state-desc">Try re-downloading this chapter from the manga page.</p></div>';
+              return;
+            }
+            urls.forEach((u, i) => {
+              const img = document.createElement("img");
+              img.src = u;
+              img.loading = i < 3 ? "eager" : "lazy";
+              img.decoding = "async";
+              img.alt = "Page " + (i + 1);
+              img.addEventListener("load", () => {
+                img.classList.add("loaded");
+                updateScroll();
+              });
+              img.addEventListener("click", () => (barHidden ? showBar() : hideBar()));
+              container.appendChild(img);
+            });
+            images = Array.from(container.querySelectorAll("img"));
+            counter.textContent = "1 / " + images.length;
+            if (endCard) endCard.classList.add("visible");
+            updateScroll();
+          })
+          .catch(() => {
+            container.innerHTML = '<div class="empty-state" style="margin-top:40px;"><div class="empty-state-title">Could not load chapter pages</div><p class="empty-state-desc">Check that the local chapter files exist or queue a re-download.</p></div>';
+          });
+      })();
+    </script>
+  </body>
+</html>

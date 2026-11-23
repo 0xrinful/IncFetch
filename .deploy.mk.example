@@ -1,0 +1,11 @@
+# Copy this file to .deploy.mk and fill in your VPS details.
+# .deploy.mk is gitignored and automatically loaded by Makefile.
+
+VPS_HOST    = ubuntu@your-vps-ip
+VPS_PORT    = 22
+VPS_DIR     = /opt/inkfetch
+VPS_SERVICE = inkfetch
+# VPS_USER  = ubuntu
+# SSH_KEY   = ~/.ssh/id_ed25519
+# GOARCH    = amd64
+# SUDO      = sudo

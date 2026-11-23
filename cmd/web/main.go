@@ -4,23 +4,27 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
+	"github.com/0xrinful/InkFetch/internal/queue"
+	"github.com/0xrinful/InkFetch/internal/registry"
+	"github.com/0xrinful/InkFetch/internal/requester/flare"
+	"github.com/0xrinful/InkFetch/internal/server"
+	"github.com/0xrinful/InkFetch/internal/service"
+	"github.com/0xrinful/InkFetch/internal/storage/db"
+	"github.com/0xrinful/InkFetch/internal/storage/files"
 	"github.com/joho/godotenv"
 	"github.com/lmittmann/tint"
-
-	"github.com/0xrinful/Zenq/internal/queue"
-	"github.com/0xrinful/Zenq/internal/registry"
-	"github.com/0xrinful/Zenq/internal/requester/flare"
-	"github.com/0xrinful/Zenq/internal/server"
-	"github.com/0xrinful/Zenq/internal/service"
-	"github.com/0xrinful/Zenq/internal/storage/db"
-	"github.com/0xrinful/Zenq/internal/storage/files"
 )
 
 func main() {
@@ -31,13 +35,13 @@ func main() {
 	slog.SetDefault(logger)
 
 	if err := godotenv.Load(); err != nil {
-		slog.Warn("No .env file found")
+		slog.Warn("no .env file found, reading environment variables directly")
 	}
 
 	tlsCertPath := os.Getenv("TLS_CERT_PATH")
 	tlsKeyPath := os.Getenv("TLS_KEY_PATH")
 	if tlsCertPath == "" || tlsKeyPath == "" {
-		log.Fatal("missing TLS certificate path")
+		log.Fatal("missing TLS_CERT_PATH or TLS_KEY_PATH")
 	}
 
 	secret := os.Getenv("SECRET")
@@ -47,13 +51,13 @@ func main() {
 			log.Fatal(err)
 		}
 		secret = base64.StdEncoding.EncodeToString(buf)
-		slog.Warn("using generated secret for dev")
+		slog.Warn("using generated ephemeral session secret")
 	}
 	server.SetSessionSecret(secret)
 
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
-		dbPath = "zenq.db"
+		dbPath = "inkfetch.db"
 	} else {
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 			log.Fatal(err)
@@ -72,22 +76,83 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer database.Close()
 
 	fileStore := files.New(filesRoot)
-	solver := flare.NewSolver()
-	registry := registry.NewRegistry(solver)
-	q := queue.NewQueue()
-	svc := service.New(registry, database, fileStore, q)
 
-	worker := queue.NewWorker(q, registry, queue.Config{
-		AutoOptimize: true,
-		AutoPack:     true,
-	}, database, fileStore)
-	worker.Start(context.Background())
+	var solver *flare.Solver
+	if envBool("FLARESOLVER_ENABLED", false) {
+		solver = flare.NewSolverWithURL(os.Getenv("FLARESOLVER_URL"))
+		slog.Info("flaresolver enabled")
+	} else {
+		slog.Info("flaresolver disabled")
+	}
+
+	reg := registry.NewRegistry(solver, database)
+	q := queue.NewQueue()
+	svc := service.New(reg, database, fileStore, q)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	worker := queue.NewWorkerWithSettings(q, reg, svc.Settings, database, fileStore)
+	worker.Start(ctx)
 
 	srv := server.New(svc)
 	handler := server.WithLogging(srv)
 
-	slog.Info("server started", "addr", 8000)
-	log.Fatal(http.ListenAndServeTLS(":8000", tlsCertPath, tlsKeyPath, handler))
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8000"
+	}
+	addr := ":" + strings.TrimPrefix(port, ":")
+
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		slog.Info("shutting down InkFetch server")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			slog.Error("server shutdown error", "err", err)
+		}
+	}()
+
+	slog.Info("InkFetch started", "addr", addr)
+	if err := httpServer.ListenAndServeTLS(
+		tlsCertPath,
+		tlsKeyPath,
+	); err != nil &&
+		!errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+
+	worker.Wait()
+	slog.Info("InkFetch stopped cleanly")
+}
+
+func envBool(key string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		slog.Warn(
+			"invalid boolean env var, using default",
+			"key",
+			key,
+			"value",
+			raw,
+			"default",
+			fallback,
+		)
+		return fallback
+	}
+	return v
 }

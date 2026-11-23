@@ -4,17 +4,16 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
-	"math/rand"
 	"net/http"
+	"net/url"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/0xrinful/Zenq/internal/models"
-	"github.com/0xrinful/Zenq/internal/queue"
-	"github.com/0xrinful/Zenq/internal/service"
+	"github.com/0xrinful/InkFetch/internal/models"
+	"github.com/0xrinful/InkFetch/internal/queue"
+	"github.com/0xrinful/InkFetch/internal/service"
 )
 
 var (
@@ -60,17 +59,16 @@ func SetSessionSecret(secret string) {
 func actionSections(sourceID, mangaSlug string) []ActionSection {
 	base := fmt.Sprintf("/manga/%s/%s", sourceID, mangaSlug)
 	return []ActionSection{
-		{Label: "Download", Endpoint: base + "/download", HasRange: true},
-		{Label: "Optimize", Endpoint: base + "/optimize", HasRange: true},
-		{Label: "Pack", Endpoint: base + "/pack", HasRange: true},
+		{Label: "Download range", Endpoint: base + "/download", HasRange: true},
+		{Label: "Optimize range", Endpoint: base + "/optimize", HasRange: true},
+		{Label: "Pack to CBZ", Endpoint: base + "/pack", HasRange: true},
 		{
-			Label:      "Download as ZIP",
+			Label:      "Export ZIP archive",
 			Endpoint:   base + "/download/zip",
 			HasRange:   true,
 			IsDownload: true,
 		},
-		{Label: "Chapters", Endpoint: base + "/refresh"},
-		{Label: "Delete Files", Endpoint: base + "/files", IsDelete: true},
+		{Label: "Delete files", Endpoint: base + "/files", IsDelete: true},
 	}
 }
 
@@ -88,132 +86,138 @@ func chapterRowData(
 	}
 }
 
-func jobStatusClass(status queue.JobStatus) string {
+func jobStatusSlug(status queue.JobStatus) string {
 	switch status {
 	case queue.JobRunning:
-		return "animate-glow-pulse border-l-2 border-neon-blue bg-neon-blue/5"
+		return "running"
 	case queue.JobDone:
-		return "border-l-2 border-neon-green"
+		return "done"
 	case queue.JobFailed:
-		return "border-l-2 border-neon-red bg-neon-red/5"
+		return "failed"
+	case queue.JobCancelled:
+		return "cancelled"
 	default:
-		return "border-l-2 border-border-dim"
+		return "pending"
 	}
 }
 
-func jobDotClass(status queue.JobStatus) string {
+func jobStatusLabel(status queue.JobStatus) string {
 	switch status {
 	case queue.JobRunning:
-		return "bg-neon-blue animate-pulse"
+		return "Running"
 	case queue.JobDone:
-		return "bg-neon-green"
+		return "Done"
 	case queue.JobFailed:
-		return "bg-neon-red"
+		return "Failed"
+	case queue.JobCancelled:
+		return "Cancelled"
 	default:
-		return "bg-dim"
+		return "Queued"
 	}
 }
 
-func jobFilters(counts any) []jobFilter {
-	all, pending, running, done, failed := fieldInt(
-		counts,
-		"All",
-	), fieldInt(
-		counts,
-		"Pending",
-	), fieldInt(
-		counts,
-		"Running",
-	), fieldInt(
-		counts,
-		"Done",
-	), fieldInt(
-		counts,
-		"Failed",
-	)
-	active := fieldString(counts, "Active")
-	if active == "" {
-		active = "all"
-	}
-
-	return []jobFilter{
-		{Status: "all", Label: "All", Count: all, Active: active == "all"},
-		{Status: "pending", Label: "Pending", Count: pending, Active: active == "pending"},
-		{Status: "running", Label: "Running", Count: running, Active: active == "running"},
-		{Status: "done", Label: "Done", Count: done, Active: active == "done"},
-		{Status: "failed", Label: "Failed", Count: failed, Active: active == "failed"},
+func jobTypeLabel(kind queue.JobType) string {
+	switch kind {
+	case queue.JobDownload:
+		return "Download"
+	case queue.JobOptimize:
+		return "Optimize"
+	case queue.JobPack:
+		return "Pack"
+	default:
+		return "Task"
 	}
 }
 
-func fieldInt(value any, name string) int {
-	v := reflectValue(value)
-	if !v.IsValid() {
-		return 0
-	}
-	field := v.FieldByName(name)
-	if !field.IsValid() {
-		return 0
-	}
-	return int(field.Int())
-}
-
-func fieldString(value any, name string) string {
-	v := reflectValue(value)
-	if !v.IsValid() {
-		return ""
-	}
-	field := v.FieldByName(name)
-	if !field.IsValid() {
-		return ""
-	}
-	return field.String()
-}
-
-func reflectValue(value any) reflect.Value {
-	v := reflect.ValueOf(value)
-	if v.Kind() == reflect.Pointer {
-		v = v.Elem()
-	}
-	return v
-}
-
-func times(count int) []int {
-	if count < 0 {
-		count = 0
-	}
-	values := make([]int, count)
-	for i := range values {
-		values[i] = i
-	}
-	return values
-}
-
-func randomHeight() int {
-	return 180 + rand.Intn(180)
+func formatChapterNum(n float64) string {
+	return strconv.FormatFloat(n, 'f', -1, 64)
 }
 
 func shouldShowTitle(ch models.ChapterRecord) bool {
 	title := strings.TrimSpace(ch.Title)
-
 	if title == "" {
 		return false
 	}
+	numStr := formatChapterNum(ch.Number)
+	if title == numStr || title == "Chapter "+numStr || title == "الفصل "+numStr || title == "الفصل رقم "+numStr {
+		return false
+	}
+	return true
+}
 
-	return title != strconv.FormatFloat(ch.Number, 'f', -1, 64)
+func pctInt(done, total int) int {
+	if total <= 0 || done <= 0 {
+		return 0
+	}
+	if done >= total {
+		return 100
+	}
+	return (done * 100) / total
+}
+
+func formatSpeed(bps float64) string {
+	if bps <= 0 {
+		return "—"
+	}
+	const (
+		kb = 1024.0
+		mb = 1024.0 * 1024.0
+	)
+	switch {
+	case bps >= mb:
+		return fmt.Sprintf("%.1f MB/s", bps/mb)
+	case bps >= kb:
+		return fmt.Sprintf("%.0f KB/s", bps/kb)
+	default:
+		return fmt.Sprintf("%.0f B/s", bps)
+	}
+}
+
+func formatBytesShort(n int64) string {
+	if n <= 0 {
+		return "0 B"
+	}
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	val := float64(n)
+	u := 0
+	for val >= 1024 && u < len(units)-1 {
+		val /= 1024
+		u++
+	}
+	if u == 0 {
+		return fmt.Sprintf("%d B", n)
+	}
+	return fmt.Sprintf("%.1f %s", val, units[u])
 }
 
 func New(svc *service.Service) *Server {
 	funcMap := template.FuncMap{
-		"actionSections":  actionSections,
-		"chapterRowData":  chapterRowData,
-		"shouldShowTitle": shouldShowTitle,
-		"jobStatusClass":  jobStatusClass,
-		"jobDotClass":     jobDotClass,
-		"jobFilters":      jobFilters,
-		"times":           times,
-		"randomHeight":    randomHeight,
-		"sub":             func(a, b int) int { return a - b },
-		"add":             func(a, b int) int { return a + b },
+		"actionSections":   actionSections,
+		"chapterRowData":   chapterRowData,
+		"shouldShowTitle":  shouldShowTitle,
+		"formatChapterNum": formatChapterNum,
+		"jobStatusSlug":    jobStatusSlug,
+		"jobStatusLabel":   jobStatusLabel,
+		"jobTypeLabel":     jobTypeLabel,
+		"pctInt":           pctInt,
+		"formatSpeed":      formatSpeed,
+		"formatBytes":      formatBytesShort,
+		"urlquery":         url.QueryEscape,
+		"lower":            strings.ToLower,
+		"sourceLabel": func(id string) string {
+			switch id {
+			case "mangalek":
+				return "MangaLek"
+			case "azora":
+				return "Azora"
+			case "teamx":
+				return "Team X"
+			default:
+				return id
+			}
+		},
+		"sub":              func(a, b int) int { return a - b },
+		"add":              func(a, b int) int { return a + b },
 		"countDownloaded": func(chapters []models.ChapterRecord) int {
 			n := 0
 			for _, c := range chapters {
@@ -223,13 +227,23 @@ func New(svc *service.Service) *Server {
 			}
 			return n
 		},
+		"countPacked": func(chapters []models.ChapterRecord) int {
+			n := 0
+			for _, c := range chapters {
+				if c.Packed {
+					n++
+				}
+			}
+			return n
+		},
 	}
+
 	templatesCache := make(map[string]*template.Template)
 
 	patterns := []string{
-		filepath.Join("web", "templates", "partials", "*.html"),
-		filepath.Join("web", "templates", "components", "*.html"),
-		filepath.Join("web", "templates", "layouts", "*.html"),
+		filepath.Join("ui", "templates", "partials", "*.html"),
+		filepath.Join("ui", "templates", "components", "*.html"),
+		filepath.Join("ui", "templates", "layouts", "*.html"),
 	}
 
 	sharedFiles := []string{}
@@ -242,14 +256,13 @@ func New(svc *service.Service) *Server {
 		sharedFiles = append(sharedFiles, matches...)
 	}
 
-	pages, err := filepath.Glob(filepath.Join("web", "templates", "pages", "*.html"))
+	pages, err := filepath.Glob(filepath.Join("ui", "templates", "pages", "*.html"))
 	if err != nil {
 		slog.Error("server: pages glob error", "err", err)
 	}
 
 	for _, page := range pages {
 		name := filepath.Base(page)
-
 		filesToParse := append([]string{page}, sharedFiles...)
 		t, err := template.New(name).Funcs(funcMap).ParseFiles(filesToParse...)
 		if err != nil {

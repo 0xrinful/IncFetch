@@ -1,0 +1,61 @@
+{{template "base" .}}
+{{define "title"}}Downloads — InkFetch{{end}}
+{{define "content"}}
+<div class="page-wrap page-wrap-narrow">
+  <header class="page-header">
+    <div>
+      <h1 class="page-title">Downloads</h1>
+      <p class="page-subtitle">Manage active chapter transfers, optimization, CBZ packing, and retries.</p>
+    </div>
+
+    <div class="toolbar-group">
+      <div id="queue-pause-slot">
+        {{template "queue-pause-btn" .Stats}}
+      </div>
+      <button
+        type="button"
+        class="btn btn-secondary btn-sm"
+        data-queue-action
+        hx-post="/api/jobs/retry-failed"
+        hx-target="#job-list"
+        hx-swap="innerHTML"
+        hx-indicator="#global-indicator"
+      >Retry Failed</button>
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm"
+        data-queue-action
+        hx-post="/api/jobs/clear"
+        hx-target="#job-list"
+        hx-swap="innerHTML"
+        hx-indicator="#global-indicator"
+      >Clear Finished</button>
+    </div>
+  </header>
+
+  <div id="queue-stats" class="status-strip">
+    {{template "queue-stats-inner" .Stats}}
+  </div>
+
+  <div class="toolbar">
+    <div id="job-filters" class="tab-strip">
+      {{template "job-filter-tabs" .InitialJobs}}
+    </div>
+
+    <div id="storage-inline" hx-get="/api/storage" hx-trigger="load" hx-swap="innerHTML" style="min-width:220px;">
+      {{template "storage-partial" .Storage}}
+    </div>
+  </div>
+
+  <div class="jobs-panel">
+    <div
+      id="job-list"
+      hx-get="/api/jobs"
+      hx-trigger="every 2s"
+      hx-swap="innerHTML"
+    >
+      {{template "jobs-items-partial" .InitialJobs}}
+    </div>
+  </div>
+</div>
+{{end}}

@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/0xrinful/Zenq/internal/models"
+	"github.com/0xrinful/InkFetch/internal/models"
 )
 
 func hashPassword(password string) (string, error) {

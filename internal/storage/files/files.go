@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/0xrinful/Zenq/internal/models"
+	"github.com/0xrinful/InkFetch/internal/models"
 )
 
 type Store struct {

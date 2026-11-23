@@ -6,10 +6,11 @@ import (
 	"html/template"
 	"net/http"
 	"strconv"
+	"strings"
 
-	"github.com/0xrinful/Zenq/internal/models"
-	"github.com/0xrinful/Zenq/internal/service"
-	"github.com/0xrinful/Zenq/internal/sources"
+	"github.com/0xrinful/InkFetch/internal/models"
+	"github.com/0xrinful/InkFetch/internal/service"
+	"github.com/0xrinful/InkFetch/internal/sources"
 )
 
 type Sources struct {
@@ -17,34 +18,30 @@ type Sources struct {
 	templates map[string]*template.Template
 }
 
-type sourcesPageData struct {
-	CurrentPath  string
-	PageTitle    string
-	BodyTemplate string
-}
-
-type sourcesListData struct {
-	sourcesPageData
-	Sources []sources.SourceInfo
-}
-
 type sourceBrowseData struct {
-	sourcesPageData
-	SourceID   string
-	SourceName string
+	CurrentPath string
+	Sources     []sources.SourceInfo
+	SourceID    string
+	SourceName  string
+	Query       string
 }
 
 type browseResultsData struct {
-	SourceID string
-	Mangas   []models.Manga
-	Page     int
+	SourceID  string
+	Mangas    []models.Manga
+	Page      int
+	Query     string
+	HasMore   bool
+	InLibrary map[string]bool
+	Error     string
 }
 
 type sourceMangaData struct {
-	sourcesPageData
-	SourceID  string
-	Manga     models.Manga
-	InLibrary bool
+	CurrentPath string
+	SourceID    string
+	SourceName  string
+	Manga       models.Manga
+	InLibrary   bool
 }
 
 func NewSources(svc *service.Service, templates map[string]*template.Template) *Sources {
@@ -53,13 +50,14 @@ func NewSources(svc *service.Service, templates map[string]*template.Template) *
 
 func (s *Sources) Index(w http.ResponseWriter, r *http.Request) {
 	infos := s.svc.Sources()
-	renderTemplateName(w, s.templates, "sources.html", "sources-list", sourcesListData{
-		sourcesPageData: sourcesPageData{
-			CurrentPath:  "sources",
-			PageTitle:    "Sources — ZENQ",
-			BodyTemplate: "sources-list-body",
-		},
-		Sources: infos,
+	if len(infos) > 0 {
+		http.Redirect(w, r, "/sources/"+infos[0].ID, http.StatusFound)
+		return
+	}
+
+	renderTemplate(w, s.templates, "sources.html", sourceBrowseData{
+		CurrentPath: "sources",
+		Sources:     infos,
 	})
 }
 
@@ -71,22 +69,20 @@ func (s *Sources) Browse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	renderTemplateName(w, s.templates, "sources.html", "source-browse", sourceBrowseData{
-		sourcesPageData: sourcesPageData{
-			CurrentPath:  "sources",
-			PageTitle:    info.Name,
-			BodyTemplate: "source-browse-body",
-		},
-		SourceID:   sourceID,
-		SourceName: info.Name,
+	renderTemplate(w, s.templates, "sources.html", sourceBrowseData{
+		CurrentPath: "sources",
+		Sources:     s.svc.Sources(),
+		SourceID:    sourceID,
+		SourceName:  info.Name,
+		Query:       strings.TrimSpace(r.URL.Query().Get("q")),
 	})
 }
 
 func (s *Sources) BrowseResults(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r.Context())
 	sourceID := r.PathValue("id")
 
-	pageStr := r.URL.Query().Get("page")
-	page, err := strconv.Atoi(pageStr)
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
 	if err != nil || page < 1 {
 		page = 1
 	}
@@ -98,41 +94,68 @@ func (s *Sources) BrowseResults(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderTemplateName(w, s.templates, "sources.html", "browse-results-partial", browseResultsData{
+			SourceID: sourceID,
+			Page:     page,
+			Error:    err.Error(),
+		})
 		return
 	}
+
 	renderTemplateName(w, s.templates, "sources.html", "browse-results-partial", browseResultsData{
-		SourceID: sourceID,
-		Mangas:   mangas,
-		Page:     page,
+		SourceID:  sourceID,
+		Mangas:    mangas,
+		Page:      page,
+		HasMore:   len(mangas) > 0,
+		InLibrary: s.librarySlugMap(r, userID, sourceID),
 	})
 }
 
 func (s *Sources) Search(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r.Context())
 	sourceID := r.PathValue("id")
 
-	pageStr := r.URL.Query().Get("page")
-	page, err := strconv.Atoi(pageStr)
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
 	if err != nil || page < 1 {
 		page = 1
 	}
 	size := 25
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
 
-	query := r.URL.Query().Get("q")
-	mangas, err := s.svc.SourceSearch(r.Context(), sourceID, query, page, size)
+	var mangas []models.Manga
+	if query == "" {
+		mangas, err = s.svc.SourceLatest(r.Context(), sourceID, page, size)
+	} else {
+		mangas, err = s.svc.SourceSearch(r.Context(), sourceID, query, page, size)
+	}
+
 	if err != nil {
 		if errors.Is(err, service.ErrUnknownSource) {
 			http.NotFound(w, r)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderTemplateName(w, s.templates, "sources.html", "browse-results-partial", browseResultsData{
+			SourceID: sourceID,
+			Page:     page,
+			Query:    query,
+			Error:    err.Error(),
+		})
 		return
 	}
 
+	// TeamX keyword search returns all matches on page 1; don't endlessly paginate empty queries.
+	hasMore := len(mangas) >= size
+	if query == "" {
+		hasMore = len(mangas) > 0
+	}
+
 	renderTemplateName(w, s.templates, "sources.html", "browse-results-partial", browseResultsData{
-		SourceID: sourceID,
-		Mangas:   mangas,
-		Page:     page,
+		SourceID:  sourceID,
+		Mangas:    mangas,
+		Page:      page,
+		Query:     query,
+		HasMore:   hasMore,
+		InLibrary: s.librarySlugMap(r, userID, sourceID),
 	})
 }
 
@@ -140,6 +163,12 @@ func (s *Sources) MangaDetail(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r.Context())
 	sourceID := r.PathValue("id")
 	slug := r.PathValue("slug")
+
+	info, ok := s.svc.SourceInfo(sourceID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
 
 	manga, err := s.svc.SourceManga(r.Context(), sourceID, slug)
 	if err != nil {
@@ -155,29 +184,14 @@ func (s *Sources) MangaDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	library, err := s.svc.Library(r.Context(), userID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	inLibrary := s.librarySlugMap(r, userID, sourceID)[slug]
 
-	inLibrary := false
-	for _, entry := range library {
-		if entry.Slug == slug && entry.SourceID == sourceID {
-			inLibrary = true
-			break
-		}
-	}
-
-	renderTemplateName(w, s.templates, "sources.html", "source-manga-detail", sourceMangaData{
-		sourcesPageData: sourcesPageData{
-			CurrentPath:  "sources",
-			PageTitle:    fmt.Sprintf("%s — ZENQ", manga.Title),
-			BodyTemplate: "source-manga-detail-body",
-		},
-		SourceID:  sourceID,
-		Manga:     *manga,
-		InLibrary: inLibrary,
+	renderTemplate(w, s.templates, "source-manga.html", sourceMangaData{
+		CurrentPath: "sources",
+		SourceID:    sourceID,
+		SourceName:  info.Name,
+		Manga:       *manga,
+		InLibrary:   inLibrary,
 	})
 }
 
@@ -191,10 +205,26 @@ func (s *Sources) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeToast(w, "Imported", "success")
-	w.Header().Set("Content-Type", "text/html")
+	writeToast(w, "Added to library", "success")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `
-		<span class="in-library-badge">✓ In Library</span>
-		<a href="/manga/%s/%s" class="btn-view">View →</a>
-		`, sourceID, slug)
+		<div class="btn-group">
+			<span class="pill pill-success">In Library</span>
+			<a href="/manga/%s/%s" class="btn btn-primary">Open in Library</a>
+		</div>
+	`, sourceID, slug)
+}
+
+func (s *Sources) librarySlugMap(r *http.Request, userID int, sourceID string) map[string]bool {
+	out := make(map[string]bool)
+	library, err := s.svc.Library(r.Context(), userID)
+	if err != nil {
+		return out
+	}
+	for _, entry := range library {
+		if entry.SourceID == sourceID {
+			out[entry.Slug] = true
+		}
+	}
+	return out
 }

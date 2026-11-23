@@ -1,0 +1,18 @@
+[Unit]
+Description=InkFetch Manga Library & Downloader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{VPS_USER}}
+WorkingDirectory={{VPS_DIR}}
+EnvironmentFile=-{{VPS_DIR}}/.env
+ExecStart={{VPS_DIR}}/{{APP_NAME}}
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

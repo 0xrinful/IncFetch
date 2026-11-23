@@ -1,0 +1,182 @@
+{{template "base" .}}
+{{define "title"}}{{.Manga.Title}} — InkFetch{{end}}
+{{define "content"}}
+<div class="page-wrap page-wrap-narrow">
+  <a href="/" class="breadcrumb">
+    <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+    Back to Library
+  </a>
+
+  <section class="detail-header">
+    <img
+      class="detail-cover"
+      src="/manga/{{.SourceID}}/{{.MangaSlug}}/cover"
+      alt="{{.Manga.Title}} cover"
+      onerror="this.onerror=null;this.src='/static/cover-placeholder.svg'"
+    />
+
+    <div class="detail-body">
+      <h1 class="detail-title">{{.Manga.Title}}</h1>
+
+      <div class="detail-meta-row">
+        <span class="pill">{{.SourceName}}</span>
+        {{if .Manga.Status}}
+          <span class="pill pill-{{lower .Manga.Status}}">{{.Manga.Status}}</span>
+        {{end}}
+      </div>
+
+      <div class="detail-stats-inline">
+        <span><strong>{{len .Chapters}}</strong> chapters</span>
+        <span><strong>{{.DownloadedCount}}</strong> downloaded</span>
+        <span><strong>{{.PackedCount}}</strong> packed</span>
+        <span><strong>{{.ReadCount}}</strong> read</span>
+      </div>
+
+      {{if .Manga.Description}}
+      <div>
+        <p id="desc" class="detail-desc clamped">{{.Manga.Description}}</p>
+        <button id="desc-btn" type="button" class="link-btn" onclick="toggleDesc()">Show more</button>
+      </div>
+      {{end}}
+
+      {{if .Manga.Genres}}
+      <div class="genre-list">
+        {{range .Manga.Genres}}
+          <span class="genre-chip">{{.}}</span>
+        {{end}}
+      </div>
+      {{end}}
+
+      <div class="detail-actions">
+        {{if .HasContinue}}
+          <a href="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .ContinueChapter}}" class="btn btn-primary">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            Read Ch. {{formatChapterNum .ContinueChapter}}
+          </a>
+        {{end}}
+
+        <form
+          hx-post="/manga/{{.SourceID}}/{{.MangaSlug}}/download"
+          hx-indicator="#global-indicator"
+          style="display:inline-flex;"
+        >
+          <input type="hidden" name="all" value="on" />
+          <button type="submit" class="btn {{if .HasContinue}}btn-secondary{{else}}btn-primary{{end}}">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download Missing
+          </button>
+        </form>
+
+        <button
+          type="button"
+          class="btn btn-secondary"
+          hx-post="/manga/{{.SourceID}}/{{.MangaSlug}}/refresh"
+          hx-indicator="#global-indicator"
+          hx-disabled-elt="this"
+        >
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <polyline points="23 4 23 10 17 10" />
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          </svg>
+          Sync
+        </button>
+
+        <button type="button" class="btn btn-ghost" onclick="openDialog('tools-dialog')">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="12" cy="12" r="1" />
+            <circle cx="19" cy="12" r="1" />
+            <circle cx="5" cy="12" r="1" />
+          </svg>
+          More Tools
+        </button>
+      </div>
+    </div>
+  </section>
+
+  {{template "action-menu" .}}
+
+  <section>
+    <div class="chapter-toolbar">
+      <div class="toolbar-group">
+        <label class="check-row" style="margin-right:4px;" title="Select all visible chapters">
+          <input id="select-all-chapters" type="checkbox" onchange="toggleSelectAllChapters(this.checked)" />
+          <span style="font-size:12.5px;">Select all</span>
+        </label>
+
+        <div id="chapter-filter-tabs" class="tab-strip">
+          <button type="button" class="tab-btn active" onclick="setChapterFilter('all', this)">All</button>
+          <button type="button" class="tab-btn" onclick="setChapterFilter('unread', this)">Unread</button>
+          <button type="button" class="tab-btn" onclick="setChapterFilter('downloaded', this)">Downloaded</button>
+          <button type="button" class="tab-btn" onclick="setChapterFilter('missing', this)">Missing</button>
+        </div>
+      </div>
+
+      <div class="toolbar-group">
+        <div class="input-wrap" style="width:170px;">
+          <svg class="icon-sm input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="search"
+            class="input input-sm input-full"
+            placeholder="Find chapter..."
+            oninput="filterChapterQuery(this.value)"
+            aria-label="Filter chapters"
+          />
+        </div>
+
+        <input id="quick-range-from" class="input input-sm mono" style="width:68px;" type="number" step="any" placeholder="From" aria-label="Range start" />
+        <input id="quick-range-to" class="input input-sm mono" style="width:68px;" type="number" step="any" placeholder="To" aria-label="Range end" />
+        <button type="button" class="btn btn-ghost btn-sm" onclick="selectChapterRangePrompt()">Select Range</button>
+
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleChapterSort(this)">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16" />
+          </svg>
+          <span data-sort-label>Newest</span>
+        </button>
+      </div>
+    </div>
+
+    <form id="bulk-chapters-form" action="/manga/{{.SourceID}}/{{.MangaSlug}}/chapters/bulk" method="post">
+      <div id="bulk-bar" class="bulk-bar" role="region" aria-label="Selected chapter actions">
+        <span id="bulk-count" class="bulk-count">0 selected</span>
+        <div class="btn-group">
+          <button type="button" class="btn btn-primary btn-sm" onclick="runBulkChapterAction('download')">Download</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="runBulkChapterAction('optimize')">Optimize</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="runBulkChapterAction('pack')">Pack CBZ</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="runBulkChapterAction('read')">Mark Read</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="runBulkChapterAction('unread')">Mark Unread</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="clearChapterSelection()">Clear</button>
+        </div>
+      </div>
+    </form>
+
+    {{if .Chapters}}
+      <div id="chapter-list" class="chapter-table">
+        {{range .Chapters}}
+          {{template "chapter-row" (chapterRowData $.SourceID $.MangaSlug . $.ReadMarks)}}
+        {{end}}
+      </div>
+      <div id="chapter-filter-empty" class="empty-state" style="display:none;margin-top:12px;">
+        <div class="empty-state-title">No chapters match this filter</div>
+        <p class="empty-state-desc">Try switching back to All or clearing the search box.</p>
+      </div>
+    {{else}}
+      <div class="empty-state">
+        <div class="empty-state-title">No chapters yet</div>
+        <p class="empty-state-desc">Click Sync above to fetch the latest chapter list from {{.SourceName}}.</p>
+      </div>
+    {{end}}
+  </section>
+</div>
+{{end}}

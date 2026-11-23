@@ -1,4 +1,4 @@
-module github.com/0xrinful/Zenq
+module github.com/0xrinful/InkFetch
 
 go 1.26.2
 

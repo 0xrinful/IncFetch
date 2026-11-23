@@ -1,0 +1,93 @@
+{{define "chapter-row"}}
+<div
+  class="chapter-row{{if .IsRead}} is-read{{end}}"
+  data-num="{{formatChapterNum .Chapter.Number}}"
+  data-title="{{.Chapter.Title}}"
+  data-read="{{if .IsRead}}true{{else}}false{{end}}"
+  data-downloaded="{{if .Chapter.Downloaded}}true{{else}}false{{end}}"
+>
+  <input
+    type="checkbox"
+    class="chapter-check"
+    value="{{formatChapterNum .Chapter.Number}}"
+    aria-label="Select chapter {{formatChapterNum .Chapter.Number}}"
+  />
+
+  <button
+    type="button"
+    class="read-toggle"
+    title="{{if .IsRead}}Mark as unread{{else}}Mark as read{{end}}"
+    aria-label="{{if .IsRead}}Mark chapter {{formatChapterNum .Chapter.Number}} unread{{else}}Mark chapter {{formatChapterNum .Chapter.Number}} read{{end}}"
+    hx-post="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .Chapter.Number}}/read"
+    hx-target="closest .chapter-row"
+    hx-swap="outerHTML"
+    hx-indicator="#global-indicator"
+  >
+    <span class="read-dot{{if .IsRead}} is-read{{end}}"></span>
+  </button>
+
+  <a href="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .Chapter.Number}}" class="chapter-main">
+    <div class="chapter-heading-line">
+      <span class="chapter-link-num">Ch. {{formatChapterNum .Chapter.Number}}</span>
+      {{if shouldShowTitle .Chapter}}
+        <span class="chapter-link-title">{{.Chapter.Title}}</span>
+      {{end}}
+    </div>
+    {{if not .Chapter.ReleasedAt.IsZero}}
+      <span class="chapter-date">{{.Chapter.ReleasedAt.Format "2006-01-02"}}</span>
+    {{end}}
+  </a>
+
+  <div class="pipeline-tags">
+    {{if .Chapter.Downloaded}}
+      <span class="stage-btn done-d" title="Downloaded">D</span>
+    {{else}}
+      <button
+        type="button"
+        class="stage-btn"
+        title="Download chapter"
+        hx-post="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .Chapter.Number}}/download"
+        hx-indicator="#global-indicator"
+        hx-disabled-elt="this"
+      >D</button>
+    {{end}}
+
+    {{if .Chapter.Optimized}}
+      <span class="stage-btn done-o" title="Optimized (WebP)">O</span>
+    {{else}}
+      <button
+        type="button"
+        class="stage-btn"
+        title="Optimize to WebP"
+        hx-post="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .Chapter.Number}}/optimize"
+        hx-indicator="#global-indicator"
+        hx-disabled-elt="this"
+      >O</button>
+    {{end}}
+
+    {{if .Chapter.Packed}}
+      <span class="stage-btn done-p" title="Packed (.cbz)">P</span>
+    {{else}}
+      <button
+        type="button"
+        class="stage-btn"
+        title="Pack into .cbz"
+        hx-post="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .Chapter.Number}}/pack"
+        hx-indicator="#global-indicator"
+        hx-disabled-elt="this"
+      >P</button>
+    {{end}}
+  </div>
+
+  <a
+    href="/manga/{{.SourceID}}/{{.MangaSlug}}/ch/{{formatChapterNum .Chapter.Number}}"
+    class="chapter-open-link{{if .Chapter.Downloaded}} ready{{end}}"
+    title="{{if .Chapter.Downloaded}}Read chapter{{else}}Open chapter{{end}}"
+    aria-label="Open chapter {{formatChapterNum .Chapter.Number}}"
+  >
+    <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  </a>
+</div>
+{{end}}
